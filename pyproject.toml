@@ -1,0 +1,74 @@
+[project]
+name = "top-pypi-dependents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Mike Fiedler", email = "miketheman@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "duckdb>=1.5.5",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "packaging>=26.3",
+    "pyarrow>=25.0.1",
+]
+
+[project.scripts]
+top-pypi-dependents = "top_pypi_dependents.cli:main"
+
+[tool.ruff]
+extend-exclude = [
+    "docs",         # design/plan prose with embedded code fences; not this repo's source
+    ".superpowers", # SDD process artifacts; not this repo's source
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",  # conflicts with the formatter
+    "CPY001",  # copyright header ceremony; LICENSE already covers this
+    "D",       # docstring style; not enforced on a tooling repo
+    "ISC001",  # conflicts with the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "INP001",   # tests/ is intentionally not a package (no __init__.py)
+    "PLR2004",  # magic values are the point of a test
+    "S101",     # assert is how pytest works
+]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.pytest]
+addopts = ["--disable-socket"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/top_pypi_dependents", "tests"]
+
+[tool.coverage.report]
+show_missing = true
+
+[build-system]
+requires = ["uv_build>=0.7.20,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+bigquery = [
+    "google-cloud-bigquery>=3.43.0",
+    "google-cloud-bigquery-storage>=2.40.0",
+]
+dev = [
+    "coverage[toml]>=7.15.4",
+    "pytest>=9.1.1",
+    "pytest-socket>=0.8.0",
+    "ruff>=0.16.3",
+    "ty>=0.0.72",
+]
