@@ -1,6 +1,6 @@
 import importlib.resources
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -184,3 +184,40 @@ def test_write_audit_sample_groups_by_project(tmp_path: Path) -> None:
     )
     lines = (tmp_path / "audit_sample.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
+
+
+class _FakeResponse:
+    """Stands in for ``urllib3.BaseHTTPResponse``."""
+
+    def __init__(self, status: int, payload: dict[str, Any] | None = None) -> None:
+        self.status = status
+        self._payload = payload
+
+    def json(self) -> dict[str, Any]:
+        assert self._payload is not None
+        return self._payload
+
+
+def test_fetch_live_names_writes_names_and_returns_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    urllib3 = pytest.importorskip("urllib3")
+    payload = {"projects": [{"name": "requests"}, {"name": "urllib3"}]}
+    monkeypatch.setattr(
+        urllib3, "request", lambda *_args, **_kwargs: _FakeResponse(200, payload)
+    )
+    count = bigquery.fetch_live_names(tmp_path)
+    assert count == 2
+    written = (tmp_path / "live_names.txt").read_text(encoding="utf-8")
+    assert written == "requests\nurllib3\n"
+
+
+def test_fetch_live_names_raises_on_a_non_2xx_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    urllib3 = pytest.importorskip("urllib3")
+    monkeypatch.setattr(
+        urllib3, "request", lambda *_args, **_kwargs: _FakeResponse(503)
+    )
+    with pytest.raises(RuntimeError, match="503"):
+        bigquery.fetch_live_names(tmp_path)

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import http
 import json
 from importlib.resources import files
 from typing import TYPE_CHECKING, Any
-
-import httpx
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -61,9 +60,29 @@ def write_audit_sample(out_dir: Path, rows: Iterable[Mapping[str, Any]]) -> None
 
 def fetch_live_names(out_dir: Path) -> int:
     """Write every live PyPI project name, one per line. Returns the count."""
+    import urllib3  # noqa: PLC0415  # ty: ignore[unresolved-import]
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    response = httpx.get(SIMPLE_INDEX, headers={"Accept": SIMPLE_ACCEPT}, timeout=120.0)
-    response.raise_for_status()
+    # This runs after both billable BigQuery queries, so a transient failure on
+    # this 42 MB fetch would discard work already paid for. A few retries with
+    # backoff is worth it here; this is a single polite fetch against PyPI, not
+    # a scraper, so the attempt count stays low.
+    retries = urllib3.Retry(
+        total=3,
+        backoff_factor=1.0,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=("GET",),
+    )
+    response = urllib3.request(
+        "GET",
+        SIMPLE_INDEX,
+        headers={"Accept": SIMPLE_ACCEPT},
+        timeout=urllib3.Timeout(connect=10.0, read=120.0),
+        retries=retries,
+    )
+    if response.status != http.HTTPStatus.OK:
+        msg = f"GET {SIMPLE_INDEX} returned HTTP {response.status}"
+        raise RuntimeError(msg)
     names = [entry["name"] for entry in response.json()["projects"]]
     (out_dir / "live_names.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
     return len(names)

@@ -34,7 +34,19 @@ jobs:
         run: uv run ruff check
       - name: Type check
         run: uv run ty check src tests
-      - name: Test
+      # Runs without the bigquery group on purpose: this is what proves the
+      # google-cloud-bigquery and urllib3 imports are genuinely lazy, so every
+      # subcommand except `extract` works on a default sync.
+      - name: Test without the bigquery group
         run: |
+          uv run python -c "import top_pypi_dependents.cli, top_pypi_dependents.sources.bigquery"
           uv run coverage run -m pytest
           uv run coverage report
+
+      # The two fetch_live_names tests skip above because urllib3 lives in the
+      # bigquery group. They cover the retry and non-2xx paths, so run the suite
+      # again with the group installed rather than leaving that code untested.
+      - name: Test with the bigquery group
+        run: |
+          uv sync --group bigquery
+          uv run pytest -q
