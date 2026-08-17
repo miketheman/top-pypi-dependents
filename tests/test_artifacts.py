@@ -9,6 +9,8 @@ from top_pypi_dependents import artifacts, warehouse
 from top_pypi_dependents.sources.fixture import FixtureSource
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# The fixture corpus is far below the production plausibility floors.
+FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
 
 ConAndSnapshot = tuple[duckdb.DuckDBPyConnection, int]
 
@@ -21,6 +23,7 @@ def con_and_snapshot() -> ConAndSnapshot:
         con,
         source=FixtureSource(FIXTURES),
         captured_at=datetime(2026, 9, 1, tzinfo=UTC),
+        floors=FLOORS,
     ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return con, snapshot_id

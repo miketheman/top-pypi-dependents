@@ -13,10 +13,16 @@ from top_pypi_dependents.sources.fixture import FixtureSource
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 
     import duckdb
 
 DEFAULT_LIMIT = 100_000
+# The top-ranked project's dependent count moves by a percent or two a month.
+# Halving means the graph collapsed -- most commonly because /simple/ came back
+# short, so most dependents stopped being live and stopped voting -- and the
+# last good `data/latest.json` must not be overwritten with that.
+MIN_TOP_DEPENDENTS_RATIO = 0.5
 
 
 def _build(args: argparse.Namespace) -> int:
@@ -26,6 +32,11 @@ def _build(args: argparse.Namespace) -> int:
         con,
         source=FixtureSource(Path(args.input)),
         captured_at=datetime.now(tz=UTC),
+        floors=warehouse.Floors(
+            winners=args.min_projects,
+            live_names=args.min_projects,
+            audit_sample=args.min_audit_sample,
+        ),
     )
     snapshot_id = load_result.snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
@@ -56,13 +67,36 @@ def _latest_snapshot(con: duckdb.DuckDBPyConnection) -> int:
     return int(row[0])
 
 
+def _check_top_row_has_not_collapsed(
+    payload: dict[str, Any], previous: dict[str, Any] | None
+) -> None:
+    """Fail if the leader's dependent count fell off a cliff since last time."""
+    prior_rows = [] if previous is None else previous.get("rows") or []
+    prior_top = prior_rows[0].get("dependents") if prior_rows else None
+    if prior_top is None:
+        return
+    rows = payload["rows"]
+    top = int(rows[0]["dependents"]) if rows else 0
+    lowest_plausible = MIN_TOP_DEPENDENTS_RATIO * int(prior_top)
+    if top < lowest_plausible:
+        msg = (
+            f"the top-ranked project has {top:,} dependents, against "
+            f"{int(prior_top):,} in the previous payload -- below the plausible "
+            f"floor of {lowest_plausible:,.0f}. The graph collapsed; refusing to "
+            f"overwrite the last good ranking."
+        )
+        raise warehouse.ImplausibleRunError(msg)
+
+
 def _artifacts(args: argparse.Namespace) -> int:
     con = warehouse.connect(Path(args.database))
     snapshot_id = _latest_snapshot(con)
     out = Path(args.output)
+    previous = artifacts.read_payload(out)
     payload = artifacts.build_payload(
-        con, snapshot_id, limit=args.limit, previous=artifacts.read_payload(out)
+        con, snapshot_id, limit=args.limit, previous=previous
     )
+    _check_top_row_has_not_collapsed(payload, previous)
     artifacts.write_json(payload, out)
     if args.edges:
         artifacts.export_edges(con, snapshot_id, Path(args.edges))
@@ -111,6 +145,19 @@ def _parser() -> argparse.ArgumentParser:
     build = sub.add_parser("build", help="load extracted data into DuckDB")
     build.add_argument("--input", default="build", help="directory holding the JSONL")
     build.add_argument("--database", default="build/dependents.duckdb")
+    build.add_argument(
+        "--min-projects",
+        type=int,
+        default=warehouse.MIN_WINNERS,
+        help="fail if the source reports fewer projects, or fewer live names, "
+        "than this; lower it to build from the test fixtures",
+    )
+    build.add_argument(
+        "--min-audit-sample",
+        type=int,
+        default=warehouse.MIN_AUDIT_SAMPLE,
+        help="fail if the version-selection audit covers fewer projects than this",
+    )
     build.set_defaults(func=_build)
 
     art = sub.add_parser("artifacts", help="emit ranked JSON and the edge export")

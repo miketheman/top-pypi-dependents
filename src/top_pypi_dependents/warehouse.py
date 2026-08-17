@@ -60,6 +60,43 @@ CREATE TABLE IF NOT EXISTS rankings (
 """
 
 
+# PyPI's /simple/ index listed 872,447 live projects on 2026-08-16, and the
+# winners query returns one row per project that has ever published a release --
+# a superset of that. A run that sees fewer than half a million projects has hit
+# something degraded (a renamed dataset, a revoked permission, a truncated
+# /simple/ response) rather than a shrinking Python ecosystem, and publishing its
+# answer would overwrite a good ranking with a collapsed one.
+MIN_WINNERS = 500_000
+MIN_LIVE_NAMES = 500_000
+# audit_sample.sql takes a deterministic 1% of projects, ~8,000 of them. The
+# audit is the only run-time evidence that the SQL sort key picks the same
+# release `packaging` would, so an empty or tiny sample means the guard passed
+# without proving anything.
+MIN_AUDIT_SAMPLE = 1_000
+# Sampled projects whose every version is unparseable by `packaging` have no
+# oracle pick and are skipped, proving nothing. Today's corpus skips a fraction
+# of a percent; at more than a quarter, the audit has stopped covering enough of
+# the sample to count as evidence.
+MAX_AUDIT_SKIP_FRACTION = 0.25
+
+
+class ImplausibleRunError(Exception):
+    """An input's magnitude is too far from what a healthy run produces."""
+
+
+@dataclass(frozen=True, slots=True)
+class Floors:
+    """The minimum plausible magnitude of each of a snapshot's inputs."""
+
+    winners: int = MIN_WINNERS
+    live_names: int = MIN_LIVE_NAMES
+    audit_sample: int = MIN_AUDIT_SAMPLE
+    max_audit_skip_fraction: float = MAX_AUDIT_SKIP_FRACTION
+
+
+DEFAULT_FLOORS = Floors()
+
+
 class AuditFailedError(Exception):
     """The source's version selection disagreed with ``packaging``."""
 
@@ -95,19 +132,47 @@ def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(SCHEMA)
 
 
+def _require_at_least(observed: int, floor: int, what: str) -> None:
+    """Fail loudly when an input is smaller than a healthy run ever produces."""
+    if observed < floor:
+        msg = (
+            f"{what}: {observed:,}, below the floor of {floor:,}. A healthy run "
+            f"is far above this, so the upstream data is degraded; refusing to "
+            f"publish a collapsed ranking."
+        )
+        raise ImplausibleRunError(msg)
+
+
 def load_snapshot(
     con: duckdb.DuckDBPyConnection,
     *,
     source: MetadataSource,
     captured_at: datetime,
+    floors: Floors = DEFAULT_FLOORS,
 ) -> SnapshotLoad:
-    """Load one snapshot. Raises ``AuditFailedError`` before writing anything."""
+    """Load one snapshot.
+
+    Raises ``ImplausibleRunError`` or ``AuditFailedError`` before writing
+    anything.
+    """
     winners = source.winners()
+    _require_at_least(len(winners), floors.winners, "winners returned by the source")
+
     sql_picks = {w.canonical_name: w.version for w in winners}
     sample = source.audit_sample()
+    _require_at_least(len(sample), floors.audit_sample, "projects in the audit sample")
     result = audit(sample, sql_picks)
     if result.disagreements:
         raise AuditFailedError(result.disagreements)
+    max_skipped = floors.max_audit_skip_fraction * len(sample)
+    if result.skipped > max_skipped:
+        msg = (
+            f"the version-selection audit skipped {result.skipped:,} of "
+            f"{len(sample):,} sampled projects (no packaging-parseable version), "
+            f"above the limit of {max_skipped:,.0f}. The audit no longer covers "
+            f"enough of the sample to be evidence that the SQL sort key is right."
+        )
+        raise ImplausibleRunError(msg)
 
     for winner in winners:
         expected = canonical(winner.name)
@@ -119,6 +184,7 @@ def load_snapshot(
             raise ValueError(msg)
 
     live = source.live_names()
+    _require_at_least(len(live), floors.live_names, "live names on the simple index")
 
     con.begin()
     try:

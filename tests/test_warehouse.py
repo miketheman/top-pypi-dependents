@@ -11,6 +11,9 @@ from top_pypi_dependents.sources.fixture import FixtureSource
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CAPTURED = datetime(2026, 9, 1, tzinfo=UTC)
+# The fixture corpus is 16 projects with a 3-project audit sample; the production
+# floors are five orders of magnitude above that, so every test load lowers them.
+FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
 
 ConAndSnapshot = tuple[duckdb.DuckDBPyConnection, int]
 
@@ -35,7 +38,7 @@ def con_and_snapshot() -> ConAndSnapshot:
     con = warehouse.connect(None)
     warehouse.create_schema(con)
     snapshot_id = warehouse.load_snapshot(
-        con, source=FixtureSource(FIXTURES), captured_at=CAPTURED
+        con, source=FixtureSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
     ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return con, snapshot_id
@@ -190,6 +193,95 @@ def test_ranks_are_dense_and_tie_broken_by_name(
     assert rows == [("requests", 1), ("django", 2), ("urllib3", 3)]
 
 
+def _empty_warehouse() -> duckdb.DuckDBPyConnection:
+    con = warehouse.connect(None)
+    warehouse.create_schema(con)
+    return con
+
+
+def _assert_nothing_written(con: duckdb.DuckDBPyConnection) -> None:
+    assert _row_count(con, "projects") == 0
+    assert _row_count(con, "dependencies") == 0
+    assert _row_count(con, "snapshots") == 0
+
+
+def test_production_floors_reject_the_fixture_corpus() -> None:
+    """The shipped defaults are what an unattended run gets when nobody passes."""
+    con = _empty_warehouse()
+    with pytest.raises(warehouse.ImplausibleRunError, match="winners"):
+        warehouse.load_snapshot(
+            con, source=FixtureSource(FIXTURES), captured_at=CAPTURED
+        )
+    _assert_nothing_written(con)
+
+
+def test_too_few_winners_aborts_the_load() -> None:
+    con = _empty_warehouse()
+    floors = dataclasses.replace(FLOORS, winners=17)
+    with pytest.raises(
+        warehouse.ImplausibleRunError, match="16, below the floor of 17"
+    ):
+        warehouse.load_snapshot(
+            con, source=FixtureSource(FIXTURES), captured_at=CAPTURED, floors=floors
+        )
+    _assert_nothing_written(con)
+
+
+def test_a_truncated_simple_index_aborts_the_load() -> None:
+    """The collapsed-liveness case: /simple/ answers, but with almost nothing."""
+
+    class TruncatedIndexSource(FixtureSource):
+        def live_names(self) -> set[str]:
+            return {"requests"}
+
+    con = _empty_warehouse()
+    floors = dataclasses.replace(FLOORS, live_names=20)
+    with pytest.raises(warehouse.ImplausibleRunError, match="live names"):
+        warehouse.load_snapshot(
+            con,
+            source=TruncatedIndexSource(FIXTURES),
+            captured_at=CAPTURED,
+            floors=floors,
+        )
+    _assert_nothing_written(con)
+
+
+def test_an_empty_audit_sample_no_longer_passes_vacuously() -> None:
+    class UnauditedSource(FixtureSource):
+        def audit_sample(self) -> dict[str, list[str]]:
+            return {}
+
+    con = _empty_warehouse()
+    with pytest.raises(warehouse.ImplausibleRunError, match="audit sample"):
+        warehouse.load_snapshot(
+            con, source=UnauditedSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
+        )
+    _assert_nothing_written(con)
+
+
+def test_a_mostly_skipped_audit_sample_aborts_the_load() -> None:
+    class UnparseableSampleSource(FixtureSource):
+        """Only one of four sampled projects has a version packaging can read."""
+
+        def audit_sample(self) -> dict[str, list[str]]:
+            return {
+                "requests": ["2.34.2"],
+                "ancient-one": ["1.5dev-r649"],
+                "ancient-two": ["not a version"],
+                "ancient-three": ["nor is this"],
+            }
+
+    con = _empty_warehouse()
+    with pytest.raises(warehouse.ImplausibleRunError, match="skipped 3 of 4"):
+        warehouse.load_snapshot(
+            con,
+            source=UnparseableSampleSource(FIXTURES),
+            captured_at=CAPTURED,
+            floors=FLOORS,
+        )
+    _assert_nothing_written(con)
+
+
 def test_audit_disagreement_aborts_the_load() -> None:
     class LyingSource(FixtureSource):
         """Picks the prerelease that packaging says should lose."""
@@ -212,7 +304,9 @@ def test_audit_disagreement_aborts_the_load() -> None:
     con = warehouse.connect(None)
     warehouse.create_schema(con)
     with pytest.raises(warehouse.AuditFailedError) as excinfo:
-        warehouse.load_snapshot(con, source=LyingSource(FIXTURES), captured_at=CAPTURED)
+        warehouse.load_snapshot(
+            con, source=LyingSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
+        )
     assert excinfo.value.disagreements[0].project == "requests"
     assert excinfo.value.disagreements[0].sql_pick == "3.0.0rc1"
     assert excinfo.value.disagreements[0].packaging_pick == "2.34.2"
@@ -232,15 +326,19 @@ def test_canonicalization_mismatch_raises_before_writing() -> None:
             return [*kept, dataclasses.replace(liar, canonical_name="not-requests")]
 
         def audit_sample(self) -> dict[str, list[str]]:
-            # Empty so the audit-oracle guard passes and the canonicalization
-            # re-derivation guard is the one under test.
-            return {}
+            # Drop the tampered project so the version-selection audit passes
+            # and the canonicalization re-derivation guard is the one under test.
+            return {
+                name: versions
+                for name, versions in super().audit_sample().items()
+                if name != "requests"
+            }
 
     con = warehouse.connect(None)
     warehouse.create_schema(con)
     with pytest.raises(ValueError, match="not-requests"):
         warehouse.load_snapshot(
-            con, source=MisnamingSource(FIXTURES), captured_at=CAPTURED
+            con, source=MisnamingSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
         )
     assert _row_count(con, "projects") == 0
     assert _row_count(con, "dependencies") == 0
@@ -255,12 +353,14 @@ def test_snapshot_with_no_parseable_edges_skips_the_dependencies_insert() -> Non
             return [w for w in super().winners() if w.canonical_name == "no-deps"]
 
         def audit_sample(self) -> dict[str, list[str]]:
-            return {}
+            # The sample has to cover projects this source actually returns, or
+            # every sampled project reads as a version-selection disagreement.
+            return {"no-deps": ["5.0.0", "4.9.0"]}
 
     con = warehouse.connect(None)
     warehouse.create_schema(con)
     load_result = warehouse.load_snapshot(
-        con, source=NoEdgesSource(FIXTURES), captured_at=CAPTURED
+        con, source=NoEdgesSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
     )
     assert _row_count(con, "projects") == 1
     assert _row_count(con, "dependencies") == 0
@@ -302,6 +402,7 @@ def test_load_snapshot_rolls_back_a_mid_load_failure() -> None:
             wrapped,  # ty: ignore[invalid-argument-type]
             source=FixtureSource(FIXTURES),
             captured_at=CAPTURED,
+            floors=FLOORS,
         )
 
     assert _row_count(con, "projects") == 0
@@ -310,7 +411,7 @@ def test_load_snapshot_rolls_back_a_mid_load_failure() -> None:
 
     # A retry starts clean instead of merging into an orphaned snapshot_id.
     snapshot_id = warehouse.load_snapshot(
-        con, source=FixtureSource(FIXTURES), captured_at=CAPTURED
+        con, source=FixtureSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
     ).snapshot_id
     assert snapshot_id == 1
     requests_rows = con.execute(

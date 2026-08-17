@@ -7,6 +7,8 @@ from top_pypi_dependents import artifacts, render, warehouse
 from top_pypi_dependents.sources.fixture import FixtureSource
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# The fixture corpus is far below the production plausibility floors.
+FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
 
 
 @pytest.fixture
@@ -17,6 +19,7 @@ def payload() -> dict:
         con,
         source=FixtureSource(FIXTURES),
         captured_at=datetime(2026, 9, 1, tzinfo=UTC),
+        floors=FLOORS,
     ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return artifacts.build_payload(

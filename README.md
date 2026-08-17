@@ -66,10 +66,16 @@ without any GCP credentials:
 
 ```bash
 mkdir -p build
-uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duckdb
+uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duckdb \
+  --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb --output build/latest.json --limit 20
 uv run top-pypi-dependents render --payload build/latest.json --output site --tiers 5,20
 ```
+
+`build` refuses a corpus smaller than half a million projects, because a real run
+never sees one and a truncated extract must not overwrite a good ranking. The two
+`--min-*` flags lower that floor for the 16-project fixture corpus; a production
+run passes neither.
 
 That leaves a rendered site under `site/` and a ranked JSON under `build/`,
 neither of which is committed.
