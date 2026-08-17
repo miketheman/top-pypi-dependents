@@ -20,13 +20,13 @@ changing how anything is counted.
 
 ## Status: dry-run verified, never run for real
 
-GCP project `top-pypi-dependents` is wired up, and a local `extract --dry-run`
-has reached the live table. No query has ever been billed, no data has been
-written, and `data/latest.json` still does not exist. The build, artifacts and
-render stages are still only exercised against the checked-in JSONL fixture in
-`tests/fixtures/`.
+GCP project `top-pypi-dependents` is wired up, and `extract --dry-run` has
+reached the live table both locally and from Actions. No query has ever been
+billed, no data has been written, and `data/latest.json` still does not exist.
+The build, artifacts and render stages are still only exercised against the
+checked-in JSONL fixture in `tests/fixtures/`.
 
-What the local dry run proved, on 2026-08-17:
+What the dry runs proved, on 2026-08-17:
 
 - `_validate_schema` passes against the real table, so
   `bigquery-public-data.pypi.distribution_metadata.requires_dist` really is
@@ -37,18 +37,19 @@ What the local dry run proved, on 2026-08-17:
   so a monthly job costs effectively nothing. Re-check the headroom as the
   upstream table grows.
 
-It proved nothing about the CI path: it used local end-user ADC, not the
-workload identity federation the workflow authenticates with.
+- Workload identity federation works end to end from Actions: OIDC mint, STS
+  exchange, service account impersonation, BigQuery job. The federated run
+  reported byte counts identical to the local one.
 
 Remaining to go live, in order:
 
 1. ~~Repository *variables* (not secrets — none is a credential)
    `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`.~~
    Done 2026-08-17, per `docs/gcp-setup.md`.
-2. `workflow_dispatch` with `dry_run: true`. The local dry run does not cover
-   this: what is still unproven is workload identity federation, i.e. whether
-   the provider, service account and repo binding actually let the runner mint
-   a token.
+2. ~~`workflow_dispatch` with `dry_run: true`.~~ Done 2026-08-17. First attempt
+   failed on `iamcredentials.googleapis.com` being disabled — impersonation is
+   a second hop that local `gcloud` credentials never take, so a laptop dry run
+   cannot catch it. `docs/gcp-setup.md` step 2 now enables that API.
 3. First real run, watched. Three things only a real run can prove: whether the
    audit oracle fires, whether the plausibility floors are calibrated, and
    whether `fetch_live_names` survives the real `/simple/` endpoint — a dry run
