@@ -2395,12 +2395,10 @@ def test_post_releases_are_not_classified_as_prereleases() -> None:
     """PEP 440 sorts 1.0.post1 ABOVE 1.0. Lumping `post` in with a/b/rc/dev is the
     most tempting way to get this wrong, and it makes every post-release lose to
     its own base version."""
-    pre_rank_block = bigquery.WINNERS_SQL[
-        bigquery.WINNERS_SQL.index("AS pre_rank") - 600 : bigquery.WINNERS_SQL.index(
-            "AS pre_rank"
-        )
-    ]
-    assert "post" not in pre_rank_block
+    head, _, tail = bigquery.WINNERS_SQL.partition("END AS pre_rank")
+    pre_rank_block = head[head.rindex("CASE") :]
+    assert tail, "expected an 'END AS pre_rank' marker in winners.sql"
+    assert "post" not in pre_rank_block.lower()
     assert "AS post_rank" in bigquery.WINNERS_SQL
     assert "IF(pre_rank = 4 AND dev_rank = 1, 1, 0) AS is_final" in bigquery.WINNERS_SQL
 
