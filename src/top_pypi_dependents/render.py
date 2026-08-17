@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -56,6 +57,17 @@ def render_site(
         "project_count": payload["project_count"],
         "edge_count": payload["edge_count"],
     }
+
+    # Served from Pages rather than linked out of the git repository: a raw-git
+    # URL ties consumers to the commit history and to whatever `data/` happens
+    # to hold, where the site is the thing this project actually publishes. The
+    # indented copy is for reading, the minified one for fetching.
+    (out_dir / "latest.json").write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    (out_dir / "latest.min.json").write_text(
+        json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
 
     (out_dir / "index.html").write_text(
         env.get_template("index.html.j2").render(**shared), encoding="utf-8"

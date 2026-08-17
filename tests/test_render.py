@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -96,3 +97,25 @@ def test_footer_names_the_fixture_source_in_prose(
     render.render_site(payload, tmp_path, tiers=(2,))
     text = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "the checked-in fixture" in text
+
+
+def test_site_serves_the_payload_as_json(tmp_path: Path, payload: dict) -> None:
+    """Consumers should fetch the data from Pages, not from a raw-git URL."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    assert json.loads((tmp_path / "latest.json").read_text(encoding="utf-8")) == payload
+
+
+def test_site_serves_a_minified_payload_too(tmp_path: Path, payload: dict) -> None:
+    render.render_site(payload, tmp_path, tiers=(2,))
+    pretty = (tmp_path / "latest.json").read_text(encoding="utf-8")
+    minified = (tmp_path / "latest.min.json").read_text(encoding="utf-8")
+    assert json.loads(minified) == payload
+    assert len(minified) < len(pretty)
+    assert minified.count("\n") == 1
+
+
+def test_index_links_both_data_downloads(tmp_path: Path, payload: dict) -> None:
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "latest.json" in text
+    assert "latest.min.json" in text

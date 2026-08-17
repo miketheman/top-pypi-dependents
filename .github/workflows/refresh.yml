@@ -150,6 +150,11 @@ jobs:
     if: inputs.dry_run != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Shared with `site.yml`, which republishes the site from the committed
+    # JSON. Both deploy Pages and must not do it at once.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
