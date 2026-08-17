@@ -62,6 +62,19 @@ def test_rows_are_ranked_and_capped(con_and_snapshot: ConAndSnapshot) -> None:
     assert payload["rows"][0]["rank_change"] is None
 
 
+def test_projects_with_no_runtime_dependent_are_left_out(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    """Spec: top 100,000, or fewer if fewer projects have a runtime dependent."""
+    con, snapshot_id = con_and_snapshot
+    payload = artifacts.build_payload(con, snapshot_id, limit=100, previous=None)
+    names = [row["project"] for row in payload["rows"]]
+    assert all(row["dependents"] > 0 for row in payload["rows"])
+    # pytest is depended on only behind an extra: 0 runtime, 1 including extras.
+    assert "pytest" not in names
+    assert "requests" in names
+
+
 def test_rank_change_is_positive_when_a_project_climbs(
     con_and_snapshot: ConAndSnapshot,
 ) -> None:
@@ -90,6 +103,26 @@ def test_write_json_round_trips(
     artifacts.write_json(payload, path)
     assert json.loads(path.read_text(encoding="utf-8")) == payload
     assert path.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_export_edges_carries_liveness_on_both_endpoints(
+    tmp_path: Path, con_and_snapshot: ConAndSnapshot
+) -> None:
+    """The Parquet export has to be able to reproduce the ranking it belongs to."""
+    con, snapshot_id = con_and_snapshot
+    path = tmp_path / "edges.parquet"
+    artifacts.export_edges(con, snapshot_id, path)
+    rows = con.execute(
+        "SELECT dependent, dependency, dependent_is_live, dependency_is_live "
+        "FROM read_parquet(?)",
+        [str(path)],
+    ).fetchall()
+    liveness = {(row[0], row[1]): (row[2], row[3]) for row in rows}
+    assert liveness[("ruamel-yaml", "requests")] == (True, True)
+    # deleted-project is in the snapshot but gone from PyPI: it must not vote.
+    assert liveness[("deleted-project", "requests")] == (False, True)
+    # A target that is not a PyPI project at all is NULL, not False.
+    assert liveness[("ghost-dep", "totally-not-on-pypi")] == (True, None)
 
 
 def test_export_edges_writes_every_edge(

@@ -19,6 +19,12 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def _canonical_name(row: dict[str, object]) -> str:
+    """The row's own ``canonical_name``, or one derived when it has none."""
+    value = row.get("canonical_name")
+    return canonical(str(row["name"])) if value is None else str(value)
+
+
 def _parse_upload_time(value: object) -> datetime | None:
     """A missing key and an explicit JSON ``null`` both yield ``None``."""
     return None if value is None else datetime.fromisoformat(str(value))
@@ -39,7 +45,11 @@ class FixtureSource:
         return [
             Winner(
                 name=str(row["name"]),
-                canonical_name=canonical(str(row["name"])),
+                # Carried through exactly as the extract computed it, so the
+                # load stage's guard compares BigQuery's canonicalization
+                # against `packaging`'s rather than against itself. Older
+                # fixtures without the column fall back to deriving it.
+                canonical_name=_canonical_name(row),
                 version=str(row["version"]),
                 upload_time=_parse_upload_time(row.get("upload_time")),
                 requires_dist=tuple(str(item) for item in row["requires_dist"]),  # ty: ignore[not-iterable]

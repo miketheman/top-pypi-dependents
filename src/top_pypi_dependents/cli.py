@@ -67,6 +67,42 @@ def _latest_snapshot(con: duckdb.DuckDBPyConnection) -> int:
     return int(row[0])
 
 
+def _captured_at(con: duckdb.DuckDBPyConnection, snapshot_id: int) -> datetime:
+    row = con.execute(
+        "SELECT captured_at FROM snapshots WHERE snapshot_id = ?", [snapshot_id]
+    ).fetchone()
+    if row is None:
+        msg = f"snapshot {snapshot_id} has no row in `snapshots`"
+        raise SystemExit(msg)
+    return row[0].astimezone(UTC)
+
+
+def _deltas_baseline(
+    previous: dict[str, Any] | None, captured_at: datetime
+) -> dict[str, Any] | None:
+    """Return the payload to compute rank movement against, if there is one.
+
+    A retry of the same month re-runs against a checkout where `data/latest.json`
+    is already this month's, so the deltas would be computed against this run's
+    own output and every row would render as unmoved. Movement is dropped rather
+    than faked.
+    """
+    if previous is None:
+        return None
+    generated_at = previous.get("generated_at")
+    if generated_at is None:
+        return previous
+    prior = datetime.fromisoformat(str(generated_at)).astimezone(UTC)
+    if (prior.year, prior.month) == (captured_at.year, captured_at.month):
+        print(  # noqa: T201
+            f"previous payload was generated {prior.isoformat()}, the same UTC "
+            f"month as this snapshot; ignoring it rather than computing rank "
+            f"movement against this run's own output"
+        )
+        return None
+    return previous
+
+
 def _check_top_row_has_not_collapsed(
     payload: dict[str, Any], previous: dict[str, Any] | None
 ) -> None:
@@ -94,8 +130,13 @@ def _artifacts(args: argparse.Namespace) -> int:
     out = Path(args.output)
     previous = artifacts.read_payload(out)
     payload = artifacts.build_payload(
-        con, snapshot_id, limit=args.limit, previous=previous
+        con,
+        snapshot_id,
+        limit=args.limit,
+        previous=_deltas_baseline(previous, _captured_at(con, snapshot_id)),
     )
+    # Checked against the payload on disk even when it is this month's own, so a
+    # retry still notices a collapse between the two runs.
     _check_top_row_has_not_collapsed(payload, previous)
     artifacts.write_json(payload, out)
     if args.edges:
@@ -109,7 +150,11 @@ def _render(args: argparse.Namespace) -> int:
     if payload is None:
         msg = f"{args.payload} not found; run `artifacts` first"
         raise SystemExit(msg)
-    tiers = tuple(int(part) for part in args.tiers.split(","))
+    try:
+        tiers = tuple(int(part) for part in args.tiers.split(","))
+    except ValueError:
+        msg = f"--tiers must be a comma-separated list of integers, not {args.tiers!r}"
+        raise SystemExit(msg) from None
     render.render_site(payload, Path(args.output), tiers=tiers)
     return 0
 
@@ -181,7 +226,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse arguments and dispatch to a stage."""
     args = _parser().parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except warehouse.ImplausibleRunError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 if __name__ == "__main__":

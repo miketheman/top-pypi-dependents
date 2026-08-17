@@ -1,5 +1,8 @@
 import importlib.resources
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
+
+import pytest
 
 from top_pypi_dependents.sources import bigquery
 
@@ -99,6 +102,58 @@ def test_importing_the_module_does_not_require_the_google_client() -> None:
     # The module must import cleanly without google-cloud-bigquery installed;
     # only calling extract_to_directory may need it.
     assert callable(bigquery.extract_to_directory)
+
+
+class _Field:
+    """Stands in for ``google.cloud.bigquery.SchemaField``."""
+
+    def __init__(self, name: str, field_type: str, mode: str) -> None:
+        self.name = name
+        self.field_type = field_type
+        self.mode = mode
+
+
+class _Client:
+    """Stands in for ``google.cloud.bigquery.Client.get_table``."""
+
+    def __init__(self, fields: list[_Field]) -> None:
+        self._fields = fields
+
+    def get_table(self, table: str) -> SimpleNamespace:
+        assert table
+        return SimpleNamespace(schema=self._fields)
+
+
+def _schema(**overrides: tuple[str, str]) -> list[_Field]:
+    columns = dict.fromkeys(bigquery.EXPECTED_COLUMNS, ("STRING", "NULLABLE"))
+    columns["requires_dist"] = bigquery.REQUIRES_DIST_TYPE
+    columns.update(overrides)
+    return [_Field(name, *spec) for name, spec in columns.items()]
+
+
+def test_validate_schema_accepts_the_real_table_shape() -> None:
+    bigquery._validate_schema(_Client(_schema()), "t")  # noqa: SLF001
+
+
+def test_validate_schema_rejects_a_missing_column() -> None:
+    fields = [f for f in _schema() if f.name != "requires_python"]
+    with pytest.raises(RuntimeError, match="requires_python"):
+        bigquery._validate_schema(_Client(fields), "t")  # noqa: SLF001
+
+
+def test_validate_schema_rejects_a_scalar_requires_dist() -> None:
+    """A delimited STRING would iterate into single characters, and every one
+    of them parses as a requirement: millions of one-letter edges, no error."""
+    fields = _schema(requires_dist=("STRING", "NULLABLE"))
+    with pytest.raises(RuntimeError, match="requires_dist"):
+        bigquery._validate_schema(_Client(fields), "t")  # noqa: SLF001
+
+
+def test_the_extract_caps_what_it_can_be_billed_for() -> None:
+    # Measured usage is 8.34 GB; the cap only has to be far enough above that
+    # to catch a query that has stopped being bounded.
+    assert bigquery.MAX_BYTES_BILLED > 8 * 1024**3
+    assert bigquery.MAX_BYTES_BILLED <= 50 * 1024**3
 
 
 def test_writes_jsonl_in_fixture_shape(tmp_path: Path) -> None:

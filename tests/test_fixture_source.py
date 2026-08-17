@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +19,39 @@ def test_winners_are_loaded_with_canonical_names(source: FixtureSource) -> None:
     assert by_canonical["zope-interface"].name == "zope.interface"
     assert by_canonical["ruamel-yaml"].name == "Ruamel_YAML"
     assert by_canonical["django"].version == "6.0.1"
+
+
+def test_canonical_name_from_the_row_is_read_verbatim(tmp_path: Path) -> None:
+    """The source's own canonicalization is what the load stage has to audit.
+
+    Re-deriving it here would make the warehouse's pushdown oracle compare
+    ``canonical(x)`` against ``canonical(x)``, which cannot fail.
+    """
+    (tmp_path / "winners.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "Zope.Interface",
+                "canonical_name": "whatever-the-query-said",
+                "version": "8.0",
+                "upload_time": None,
+                "requires_dist": [],
+                "summary": "",
+                "requires_python": "",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    winner = FixtureSource(tmp_path).winners()[0]
+    assert winner.canonical_name == "whatever-the-query-said"
+
+
+def test_canonical_name_falls_back_when_the_row_has_none(
+    source: FixtureSource,
+) -> None:
+    """The checked-in fixtures predate the column; they still canonicalize."""
+    by_canonical = {w.canonical_name: w for w in source.winners()}
+    assert by_canonical["zope-interface"].name == "zope.interface"
 
 
 def test_winner_upload_time_is_timezone_aware(source: FixtureSource) -> None:

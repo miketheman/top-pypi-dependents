@@ -177,6 +177,8 @@ def _insert_arrow(
     table -- at production size, a half-hour load inside one open transaction
     against one that finishes in well under a minute.
     """
+    if not rows:
+        return
     columns = zip(*rows, strict=True)
     data = pa.table(dict(zip(schema.names, columns, strict=True)), schema=schema)
     view = f"incoming_{table}"
@@ -284,8 +286,7 @@ def load_snapshot(
                         parsed.is_runtime,
                     )
                 )
-        if edge_rows:
-            _insert_arrow(con, "dependencies", DEPENDENCIES_ARROW_SCHEMA, edge_rows)
+        _insert_arrow(con, "dependencies", DEPENDENCIES_ARROW_SCHEMA, edge_rows)
 
         con.execute(
             "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?)",

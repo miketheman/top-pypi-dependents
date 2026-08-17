@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from top_pypi_dependents import warehouse
 from top_pypi_dependents.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -123,6 +122,50 @@ def test_artifacts_computes_deltas_against_the_existing_file(tmp_path: Path) -> 
     assert row["rank_change"] == 8
 
 
+def test_artifacts_ignores_a_previous_payload_from_the_same_month(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A same-month retry must not compute rank movement against its own output."""
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    out_json = tmp_path / "latest.json"
+    _write_previous(
+        out_json, generated_at=datetime.now(tz=UTC).isoformat(), rank=9, dependents=6
+    )
+
+    assert (
+        main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED]) == 0
+    )
+    assert _run_artifacts(db, out_json) == 0
+
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    row = next(r for r in payload["rows"] if r["project"] == "requests")
+    assert row["previous_rank"] is None
+    assert row["rank_change"] is None
+    assert payload["previous_generated_at"] is None
+    assert "same UTC month" in capsys.readouterr().out
+
+
+def test_artifacts_keeps_a_previous_payload_with_no_timestamp(tmp_path: Path) -> None:
+    """No generated_at means no month to compare, so the deltas still stand."""
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    out_json = tmp_path / "latest.json"
+    out_json.write_text(
+        json.dumps({"rows": [{"rank": 9, "project": "requests", "dependents": 6}]}),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED]) == 0
+    )
+    assert _run_artifacts(db, out_json) == 0
+
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    row = next(r for r in payload["rows"] if r["project"] == "requests")
+    assert row["previous_rank"] == 9
+
+
 def test_artifacts_refuses_to_overwrite_when_the_leader_collapses(
     tmp_path: Path,
 ) -> None:
@@ -137,19 +180,41 @@ def test_artifacts_refuses_to_overwrite_when_the_leader_collapses(
     assert (
         main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED]) == 0
     )
-    with pytest.raises(warehouse.ImplausibleRunError, match="6 dependents, against"):
+    with pytest.raises(SystemExit) as excinfo:
         _run_artifacts(db, out_json)
 
+    assert "6 dependents, against" in str(excinfo.value)
     assert out_json.read_text(encoding="utf-8") == before
 
 
 def test_build_refuses_the_fixture_corpus_at_the_production_floors(
     tmp_path: Path,
 ) -> None:
+    """An ImplausibleRunError must surface as SystemExit, not an uncaught traceback."""
     build_dir = _fixture_build_dir(tmp_path)
     db = build_dir / "dependents.duckdb"
-    with pytest.raises(warehouse.ImplausibleRunError):
+    with pytest.raises(SystemExit) as excinfo:
         main(["build", "--input", str(build_dir), "--database", str(db)])
+
+    assert excinfo.value.code != 0
+
+
+def test_render_with_non_numeric_tiers_exits_with_a_message(tmp_path: Path) -> None:
+    payload = tmp_path / "latest.json"
+    payload.write_text(json.dumps({"rows": []}), encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "render",
+                "--payload",
+                str(payload),
+                "--output",
+                str(tmp_path / "site"),
+                "--tiers",
+                "abc",
+            ]
+        )
+    assert "comma-separated list of integers" in str(excinfo.value)
 
 
 def test_render_without_a_payload_exits_nonzero(tmp_path: Path) -> None:

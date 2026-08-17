@@ -1,7 +1,7 @@
 [project]
 name = "top-pypi-dependents"
 version = "0.1.0"
-description = "Add your description here"
+description = "Rank PyPI projects by how many other projects declare a dependency on them"
 readme = "README.md"
 authors = [
     { name = "Mike Fiedler", email = "miketheman@gmail.com" }
@@ -13,6 +13,10 @@ dependencies = [
     "jinja2>=3.1.6",
     "packaging>=26.3",
     "pyarrow>=25.0.1",
+    # Nothing here imports pytz, which makes it look removable. It is not:
+    # duckdb 1.5.5 imports it internally and raises `InvalidInputException:
+    # Required module 'pytz' failed to import` on any TIMESTAMPTZ fetch, which
+    # is every snapshot header this project reads. Leave it.
     "pytz>=2026.3.post1",
 ]
 

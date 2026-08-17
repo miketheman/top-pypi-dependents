@@ -1,4 +1,6 @@
 import dataclasses
+import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -314,6 +316,39 @@ def test_audit_disagreement_aborts_the_load() -> None:
     assert _row_count(con, "projects") == 0
     assert _row_count(con, "dependencies") == 0
     assert _row_count(con, "snapshots") == 0
+
+
+def test_a_bad_canonical_name_in_the_extract_aborts_the_load(tmp_path: Path) -> None:
+    """The end-to-end oracle for the SQL-side canonicalization pushdown.
+
+    ``winners.sql`` computes `canonical_name` in BigQuery; this proves the load
+    stage compares that value against ``packaging`` rather than against a value
+    it derived itself.
+    """
+    for filename in ("audit_sample.jsonl", "live_names.txt"):
+        shutil.copy(FIXTURES / filename, tmp_path / filename)
+    rows = [
+        json.loads(line)
+        for line in (FIXTURES / "winners.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    for row in rows:
+        # `django` is outside the audit sample, so the version-selection guard
+        # cannot fire first and mask this one.
+        if row["name"] == "Django":
+            row["canonical_name"] = "djangoo"
+    (tmp_path / "winners.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+    con = _empty_warehouse()
+    with pytest.raises(ValueError, match="djangoo"):
+        warehouse.load_snapshot(
+            con, source=FixtureSource(tmp_path), captured_at=CAPTURED, floors=FLOORS
+        )
+    _assert_nothing_written(con)
 
 
 def test_canonicalization_mismatch_raises_before_writing() -> None:

@@ -20,6 +20,14 @@ _SQL = files("top_pypi_dependents") / "sql"
 WINNERS_SQL = (_SQL / "winners.sql").read_text(encoding="utf-8")
 AUDIT_SQL = (_SQL / "audit_sample.sql").read_text(encoding="utf-8")
 
+# (field_type, mode) of `requires_dist`, an ARRAY<STRING> in BigQuery's schema.
+REQUIRES_DIST_TYPE = ("STRING", "REPEATED")
+# Both queries together measured 8.34 GB. The cap is a backstop for an
+# unattended job against a billing-enabled project: if a schema or dataset
+# change ever turns one of these into a full-table scan, it fails instead of
+# spending.
+MAX_BYTES_BILLED = 50 * 1024**3
+
 EXPECTED_COLUMNS = frozenset(
     {
         "name",
@@ -62,10 +70,22 @@ def fetch_live_names(out_dir: Path) -> int:
 
 
 def _validate_schema(client: Any, table: str) -> None:  # noqa: ANN401
-    actual = {field.name for field in client.get_table(table).schema}
-    missing = EXPECTED_COLUMNS - actual
+    fields = {field.name: field for field in client.get_table(table).schema}
+    missing = EXPECTED_COLUMNS - fields.keys()
     if missing:
         msg = f"{table} is missing expected column(s): {sorted(missing)}"
+        raise RuntimeError(msg)
+    # The name alone is not enough for this one. If requires_dist were ever a
+    # delimited STRING rather than ARRAY<STRING>, iterating it would yield
+    # single characters, each of which parses as a valid requirement -- millions
+    # of one-letter edges published with nothing raising.
+    requires_dist = fields["requires_dist"]
+    if (requires_dist.field_type, requires_dist.mode) != REQUIRES_DIST_TYPE:
+        msg = (
+            f"{table}.requires_dist is "
+            f"{requires_dist.field_type}/{requires_dist.mode}; expected "
+            f"ARRAY<STRING>, that is {REQUIRES_DIST_TYPE[0]}/{REQUIRES_DIST_TYPE[1]}"
+        )
         raise RuntimeError(msg)
 
 
@@ -79,14 +99,25 @@ def extract_to_directory(
     _validate_schema(client, TABLE)
 
     if dry_run:
-        config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+        config = bigquery.QueryJobConfig(
+            dry_run=True,
+            use_query_cache=False,
+            maximum_bytes_billed=MAX_BYTES_BILLED,
+        )
         for label, sql in (("winners", WINNERS_SQL), ("audit", AUDIT_SQL)):
             job = client.query(sql, job_config=config)
             gib = job.total_bytes_processed / 1024**3
             print(f"{label}: {job.total_bytes_processed:,} bytes ({gib:.2f} GiB)")  # noqa: T201
         return 0
 
-    write_winners(out_dir, (dict(row) for row in client.query(WINNERS_SQL).result()))
-    write_audit_sample(out_dir, (dict(row) for row in client.query(AUDIT_SQL).result()))
+    config = bigquery.QueryJobConfig(maximum_bytes_billed=MAX_BYTES_BILLED)
+    write_winners(
+        out_dir,
+        (dict(row) for row in client.query(WINNERS_SQL, job_config=config).result()),
+    )
+    write_audit_sample(
+        out_dir,
+        (dict(row) for row in client.query(AUDIT_SQL, job_config=config).result()),
+    )
     fetch_live_names(out_dir)
     return 0

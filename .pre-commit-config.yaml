@@ -7,7 +7,11 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
+      # data/latest.json is the artifact this repo exists to commit: 100,000
+      # rows measure ~18.5 MB, well past the 500 KB default. 25 MB still stops
+      # a stray DuckDB database from being committed.
       - id: check-added-large-files
+        args: [--maxkb=25000]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.3
     hooks:

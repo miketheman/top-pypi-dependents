@@ -164,8 +164,10 @@ uv run top-pypi-dependents extract --dry-run --project <PROJECT_ID>
 ```
 
 This reports BigQuery's estimated bytes-to-be-scanned without running a
-billable query. Record that figure in the "Cost model" section of
-`docs/superpowers/specs/2026-08-16-top-pypi-dependents-design.md` (it
-currently reads "Not yet measured"), replacing the placeholder with the real
-number so the free-tier assumption in that document is backed by evidence
-instead of an estimate.
+billable query. Compare it against the measured figures in the "Cost model"
+section of
+`docs/superpowers/specs/2026-08-16-top-pypi-dependents-design.md` — 7.8 GB
+for the winners query and 538 MB for the audit sample. If what you see is
+materially larger, the query or the upstream table has changed and the
+free-tier assumption in that document needs revisiting before you run the
+real extract; update the figures there to match.

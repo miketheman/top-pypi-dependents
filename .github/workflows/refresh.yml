@@ -20,6 +20,9 @@ jobs:
   refresh:
     name: Extract, build, publish
     runs-on: ubuntu-latest
+    # Generous, but far below the 360-minute default: the only backstop against
+    # a hung query or a stalled /simple/ fetch burning a whole runner day.
+    timeout-minutes: 90
     permissions:
       contents: write
       id-token: write
@@ -101,11 +104,18 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- data/latest.json; then
+          # data/latest.json starts each run untracked or unchanged; `git diff`
+          # against the worktree can't see either case, so stage first and
+          # test the index instead.
+          git add data/latest.json
+          if git diff --cached --quiet -- data/latest.json; then
             echo "No ranking change; nothing to commit."
           else
-            git add data/latest.json
             git commit -m "Refresh rankings for ${MONTH}"
+            # This job checked out at the top of an hour-long run. Anything
+            # merged to the branch since -- a Dependabot PR, most likely --
+            # makes the push non-fast-forward and throws away a billable query.
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push
           fi
 
@@ -139,6 +149,7 @@ jobs:
     needs: refresh
     if: inputs.dry_run != true
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write

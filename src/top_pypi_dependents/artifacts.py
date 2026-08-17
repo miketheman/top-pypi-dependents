@@ -20,7 +20,9 @@ SELECT
     r.dependents_runtime,
     r.dependents_all
 FROM rankings AS r
-WHERE r.snapshot_id = ?
+-- Fewer than `limit` rows when fewer projects than that have a runtime
+-- dependent at all: a rank with a zero count is not a ranking.
+WHERE r.snapshot_id = ? AND r.dependents_runtime > 0
 ORDER BY r.rank_runtime
 LIMIT ?
 """
@@ -104,15 +106,36 @@ def write_json(payload: dict[str, Any], path: Path) -> None:
     )
 
 
+_EDGES_SQL = """
+SELECT
+    d.*,
+    src.is_live AS dependent_is_live,
+    tgt.is_live AS dependency_is_live
+FROM dependencies AS d
+LEFT JOIN projects AS src
+    ON src.snapshot_id = d.snapshot_id AND src.canonical_name = d.dependent
+-- LEFT, because a dependency target need not be a PyPI project at all.
+LEFT JOIN projects AS tgt
+    ON tgt.snapshot_id = d.snapshot_id AND tgt.canonical_name = d.dependency
+WHERE d.snapshot_id = ?
+"""
+
+
 def export_edges(con: duckdb.DuckDBPyConnection, snapshot_id: int, path: Path) -> None:
-    """Write one snapshot's full edge list to Parquet."""
+    """Write one snapshot's full edge list to Parquet.
+
+    Each endpoint carries its liveness, so a consumer holding only this file can
+    reproduce the ranking's counting rules: non-live dependents do not vote and
+    non-live targets do not rank. A NULL ``dependency_is_live`` means the target
+    is not a PyPI project in this snapshot at all, which is a different thing
+    from a project that is known and no longer live.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     # DuckDB rejects a bound parameter as a COPY target ("Unsupported parameter
     # type for filename"), so the path is interpolated as a SQL string literal
     # with embedded quotes doubled. The predicate stays parameterized.
     target = str(path).replace("'", "''")
     con.execute(
-        f"COPY (SELECT * FROM dependencies WHERE snapshot_id = ?) "  # noqa: S608
-        f"TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+        f"COPY ({_EDGES_SQL}) TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)",
         [snapshot_id],
     )
