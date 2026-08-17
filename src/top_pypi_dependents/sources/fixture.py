@@ -19,6 +19,11 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def _parse_upload_time(value: object) -> datetime | None:
+    """A missing key and an explicit JSON ``null`` both yield ``None``."""
+    return None if value is None else datetime.fromisoformat(str(value))
+
+
 class FixtureSource:
     """Reads ``winners.jsonl``, ``audit_sample.jsonl``, and ``live_names.txt``."""
 
@@ -36,7 +41,7 @@ class FixtureSource:
                 name=str(row["name"]),
                 canonical_name=canonical(str(row["name"])),
                 version=str(row["version"]),
-                upload_time=datetime.fromisoformat(str(row["upload_time"])),
+                upload_time=_parse_upload_time(row.get("upload_time")),
                 requires_dist=tuple(str(item) for item in row["requires_dist"]),  # ty: ignore[not-iterable]
                 summary=str(row["summary"]),
                 requires_python=str(row["requires_python"]),

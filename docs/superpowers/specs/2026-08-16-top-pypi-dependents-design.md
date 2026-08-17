@@ -178,28 +178,60 @@ step gated on its oracle, not as part of the initial build.
 
 ## Cost model
 
-Not yet measured — there is no GCP project wired up, so bytes-scanned is unknown.
-The `extract` command therefore takes a `--dry-run` flag that reports BigQuery's
-estimated bytes-to-be-scanned and exits without running a billable query. That number
-gets recorded here once known.
+**Measured** by `--dry-run` against the live table on 2026-08-17:
 
-Expected shape, monthly:
+| query | bytes scanned |
+| --- | --- |
+| `winners.sql` | 7.8 GB |
+| `audit_sample.sql` | 538.46 MB |
+| **monthly total** | **~8.34 GB** |
 
-- Query scan: one pass over `name`, `version`, `upload_time`, `requires_dist`,
-  `summary`, `requires_python` for the winners query, plus a second pass over `name`
-  and `version` alone for the audit sample. Expected to land inside BigQuery's
-  1TB/month free tier. To be confirmed by `--dry-run`.
-- Storage Read API: ~60MB of results at $1.10/TB. Negligible.
-- Network egress: ~60MB at roughly $0.12/GB. Negligible.
+That is **0.76% of BigQuery's 1 TiB/month free query tier** — the pipeline could run
+about 130 times a month before incurring a query charge. At on-demand pricing beyond
+the free tier it would be roughly $0.05/month. Storage Read API and egress on ~800k
+result rows are negligible against that.
+
+Cost is therefore not a constraint on this design, and the `summary` column — which
+`projects` stores but no artifact currently reads — does not need dropping to control
+scan size. It remains an available lever if the table grows substantially.
+
+`extract --dry-run` reports these numbers without running a billable query, and should
+be re-run if the query ever changes shape.
 
 A billing account is required regardless of whether any charge is incurred.
 
-### Schema validation
+### Schema
 
-The exact column names and types of `distribution_metadata` are unverified — they
-cannot be inspected without credentials. The ClickHouse mirror's schema is the working
-assumption. The first live `--dry-run` validates it, and the extract stage fails loudly
-on a schema mismatch rather than silently producing empty columns.
+**Verified against the live table on 2026-08-17.** All three load-bearing assumptions hold:
+
+| column | type | nullable | why it matters |
+| --- | --- | --- | --- |
+| `filename` | `STRING` | YES | the dedup tiebreak depends on it existing |
+| `requires_dist` | `ARRAY<STRING>` | NO | the reader iterates it; a delimited `STRING` would produce garbage. Being non-nullable confirms it is `[]` rather than `NULL` for dependency-free releases |
+| `upload_time` | `TIMESTAMP` | **YES** | see below — this one was assumed non-null and is not |
+
+The table holds **23,715,100 rows** and 145.89 GB logical, partitioned by MONTH on
+`upload_time` across 259 partitions. Column pruning is what keeps the winners query at
+7.8 GB rather than the full 145.89 GB; there is no useful partition filter, since
+selecting a latest release requires seeing every release.
+
+That row count is also the clearest measure of the ClickHouse mirror's incompleteness:
+17.9M rows there against 23.7M here, a 32% shortfall.
+
+`extract` validates the column names before querying and fails loudly on a mismatch
+rather than silently producing empty columns.
+
+### `upload_time` is nullable
+
+The column permits NULL, and because it is the partition field, such rows land in the
+`__NULL__` partition. Two consequences:
+
+- `per_version`'s `ORDER BY upload_time DESC, filename DESC` sorts NULLs last in
+  BigQuery, so a NULL-timestamped file loses the dedup to any timestamped sibling. The
+  `filename DESC` tiebreak resolves the case where every file of a release is NULL.
+- A winner that survives with a NULL `upload_time` must round-trip through JSONL. The
+  reader therefore treats `upload_time` as optional; `Winner.upload_time` and
+  `projects.latest_upload_time` are both nullable.
 
 ## Counting rules
 

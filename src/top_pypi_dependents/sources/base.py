@@ -16,7 +16,7 @@ class Winner:
     name: str
     canonical_name: str
     version: str
-    upload_time: datetime
+    upload_time: datetime | None
     requires_dist: tuple[str, ...]
     summary: str
     requires_python: str

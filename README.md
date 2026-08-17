@@ -4,7 +4,7 @@ Which PyPI projects does the rest of PyPI actually depend on? This ranks project
 by how many other live projects declare a dependency on them, refreshed monthly
 from PyPI's own BigQuery metadata table.
 
-- Site: https://miketheman.github.io/top-pypi-dependents/
+- Site: <https://miketheman.github.io/top-pypi-dependents/>
 - Ranked JSON: [`data/latest.json`](data/latest.json)
 
 This is repo-only tooling. It is not published to PyPI.

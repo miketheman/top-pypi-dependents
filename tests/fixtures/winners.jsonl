@@ -13,3 +13,4 @@
 {"name": "deleted-project", "version": "1.0.0", "upload_time": "2020-01-01T00:00:00Z", "requires_dist": ["requests"], "summary": "No longer live on PyPI.", "requires_python": ">=3.6"}
 {"name": "pytest", "version": "9.1.1", "upload_time": "2026-04-01T00:00:00Z", "requires_dist": ["iniconfig", "pluggy>=1.5"], "summary": "Testing framework.", "requires_python": ">=3.10"}
 {"name": "urllib3", "version": "2.7.0", "upload_time": "2026-05-07T16:13:18Z", "requires_dist": [], "summary": "HTTP library.", "requires_python": ">=3.9"}
+{"name": "null-upload-time", "version": "1.0.0", "upload_time": null, "requires_dist": [], "summary": "Every sibling file has a NULL upload_time.", "requires_python": ">=3.9"}

@@ -25,6 +25,11 @@ def test_winner_upload_time_is_timezone_aware(source: FixtureSource) -> None:
     assert winner.upload_time == datetime(2026, 5, 14, 19, 25, 27, tzinfo=UTC)
 
 
+def test_null_upload_time_is_none(source: FixtureSource) -> None:
+    winner = next(w for w in source.winners() if w.canonical_name == "null-upload-time")
+    assert winner.upload_time is None
+
+
 def test_requires_dist_is_a_tuple(source: FixtureSource) -> None:
     winner = next(w for w in source.winners() if w.canonical_name == "no-deps")
     assert winner.requires_dist == ()

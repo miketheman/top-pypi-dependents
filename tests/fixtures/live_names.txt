@@ -24,3 +24,4 @@ click
 pytest
 iniconfig
 pluggy
+null-upload-time

@@ -322,6 +322,17 @@ def test_load_snapshot_rolls_back_a_mid_load_failure() -> None:
     assert requests_rows[0] == 1
 
 
+def test_null_upload_time_survives_as_null(con_and_snapshot: ConAndSnapshot) -> None:
+    con, snapshot_id = con_and_snapshot
+    row = con.execute(
+        "SELECT latest_upload_time FROM projects "
+        "WHERE snapshot_id = ? AND canonical_name = 'null-upload-time'",
+        [snapshot_id],
+    ).fetchone()
+    assert row is not None
+    assert row[0] is None
+
+
 def test_compute_rankings_is_idempotent(con_and_snapshot: ConAndSnapshot) -> None:
     con, snapshot_id = con_and_snapshot
     before = con.execute(

@@ -73,11 +73,11 @@ def test_build_prints_a_one_line_summary(
     assert len(lines) == 1
     summary = lines[0]
     assert "snapshot 1" in summary
-    # winners.jsonl has 15 projects and 26 requires_dist entries, one of
+    # winners.jsonl has 16 projects and 26 requires_dist entries, one of
     # which (malformed-deps) is unparseable, leaving 25 edges. None of the
     # audit_sample.jsonl versions are packaging-unparseable, so the
     # audit-skip count is 0 for this fixture.
-    assert "15 project" in summary
+    assert "16 project" in summary
     assert "25 edge" in summary
     assert "1 unparsed" in summary
     assert "0 audit-skip" in summary
