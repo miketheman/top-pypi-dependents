@@ -102,7 +102,16 @@ suppress it.
 
 **Fixture-driven runs need the floors relaxed.** `build` refuses implausibly
 small inputs, so local fixture runs pass `--min-projects 1 --min-audit-sample 1`.
-Production passes neither flag and gets the real floors.
+Production passes neither flag and gets the real floors. `artifacts` needs the
+same treatment for a different reason: it defaults to `--min-dependents 2`, and
+the fixture ranks three projects, two of them with a single dependent — so a
+fixture run without `--min-dependents 1` renders one row and looks broken.
+
+**`FixtureSource` is not only for fixtures.** It names the JSONL layout, and
+`extract` writes exactly that layout from BigQuery, so it serves production too.
+It reports provenance from the `source.txt` that `extract` writes beside the
+data; without that file it answers "fixture", which is how the first real run
+published a payload and a footer claiming BigQuery data came from a fixture.
 
 **`git diff --quiet -- <untracked path>` exits 0.** That silently made the
 workflow never commit its own artifact. The commit check stages first and tests
@@ -144,8 +153,8 @@ prek run --all-files  # the git-hook gate; must pass on a clean clone
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 103 passed, 3 skipped
-uv sync --group bigquery       # 106 passed, 0 skipped
+uv sync                        # 123 passed, 3 skipped
+uv sync --group bigquery       # 126 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
@@ -157,9 +166,17 @@ Full pipeline against the fixture, no credentials needed:
 uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duckdb \
     --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb \
-    --output build/latest.json --limit 20
+    --output build/latest.json --limit 20 --min-dependents 1
 uv run top-pypi-dependents render --payload build/latest.json --output site --tiers 5,20
 ```
+
+Every stage logs progress and outcomes to stderr; stdout stays the result.
+`--log-level debug` (global, before the subcommand) adds row and byte counters
+inside the long loops.
+
+`render` also writes `latest.json` and `latest.min.json` into the site output.
+That is what the site serves, and `site.yml` republishes it from the committed
+`data/latest.json` without touching BigQuery whenever a template changes.
 
 ## Conventions
 

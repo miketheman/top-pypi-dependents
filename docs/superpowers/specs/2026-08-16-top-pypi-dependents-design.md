@@ -351,21 +351,30 @@ render every row as unchanged.
 
 ## Artifacts
 
-### `data/latest.json` (committed)
+### The ranked JSON
 
-The only artifact in git. Top 100,000 by `rank_runtime`, or fewer if fewer than 100,000
-projects have at least one runtime dependent. The tail is dominated by projects with a
-single dependent; ties are broken by canonical name ascending so that rank assignment is
-stable across runs.
+Published by the site as `latest.json` (indented) and `latest.min.json` (compact),
+which are the URLs consumers should use. The same payload is committed to
+`data/latest.json`, minified, where its remaining job is to give the next run a
+baseline for rank movement.
+
+Top 100,000 by `rank_runtime`, or fewer if fewer projects clear `min_dependents`.
+Ties are broken by canonical name ascending so rank assignment is stable across runs.
+
+The tail used to be dominated by single-dependent projects: they were 54% of the
+first real run's rows and 55% of its bytes. `min_dependents` defaults to 2 and cuts
+them. Because rows are ordered by count, that truncates a contiguous tail rather
+than punching holes, so ranks stay `1..N` with no gaps.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-09-01T00:00:00Z",
-  "source": "bigquery-public-data.pypi.distribution_metadata",
+  "source": "bigquery",
   "counting": {
     "basis": "latest non-prerelease release",
-    "ranked_on": "runtime"
+    "ranked_on": "runtime",
+    "min_dependents": 2
   },
   "previous_generated_at": "2026-08-01T00:00:00Z",
   "project_count": 872447,
@@ -384,6 +393,11 @@ stable across runs.
 ```
 
 `previous_rank` and `rank_change` are null for projects new to the list.
+
+`source` names where the data came from — `bigquery` or `fixture`. `build` reads
+its input through `FixtureSource`, which names the JSONL layout rather than any
+origin, so `extract` records the provenance in a `source.txt` beside the JSONL and
+the payload reports that. Without it a real run publishes itself as a fixture.
 
 ### Release assets (not committed)
 
