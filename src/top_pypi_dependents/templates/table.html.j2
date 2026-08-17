@@ -1,0 +1,40 @@
+{% extends "base.html.j2" %}
+{% block title %}Top {{ "{:,}".format(tier) }} PyPI Dependents{% endblock %}
+{% block content %}
+<h1>Top {{ "{:,}".format(tier) }} PyPI projects by dependent count</h1>
+<p class="muted">Ranked by how many projects declare an unconditional runtime dependency
+on them, using each project's latest release.</p>
+<input id="filter" type="search" placeholder="Filter by project name" autocomplete="off">
+<table id="rows">
+  <thead>
+    <tr>
+      <th class="num">#</th><th>Project</th>
+      <th class="num">Dependents</th><th class="num">Incl. extras</th><th>Change</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td class="num">{{ row.rank }}</td>
+      <td><a href="https://pypi.org/project/{{ row.project }}/">{{ row.project }}</a></td>
+      <td class="num">{{ "{:,}".format(row.dependents) }}</td>
+      <td class="num">{{ "{:,}".format(row.dependents_all) }}</td>
+      <td>
+      {%- if row.rank_change is none %}<span class="muted">new</span>
+      {%- elif row.rank_change > 0 %}<span class="up">&#9650; {{ row.rank_change }}</span>
+      {%- elif row.rank_change < 0 %}<span class="down">&#9660; {{ -row.rank_change }}</span>
+      {%- else %}<span class="muted">&ndash;</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<script>
+document.getElementById("filter").addEventListener("input", (event) => {
+  const needle = event.target.value.toLowerCase();
+  for (const row of document.querySelectorAll("#rows tbody tr")) {
+    row.hidden = !row.cells[1].textContent.toLowerCase().includes(needle);
+  }
+});
+</script>
+{% endblock %}

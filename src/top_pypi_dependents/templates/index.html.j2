@@ -1,0 +1,31 @@
+{% extends "base.html.j2" %}
+{% block content %}
+<h1>Top PyPI Dependents</h1>
+<p>Which PyPI projects does the rest of PyPI actually depend on? This ranks projects by
+the number of other projects that declare a dependency on them, refreshed monthly.</p>
+
+<h2>How it is counted</h2>
+<ul>
+  <li>One release per project &mdash; the highest final release by PEP&nbsp;440 ordering,
+      falling back to the highest prerelease for projects that have only prereleases.</li>
+  <li>The headline number counts distinct projects declaring an <em>unconditional runtime</em>
+      dependency. Dependencies gated behind an <code>extra</code> are counted separately, in
+      the "incl. extras" column. That distinction matters: roughly 37% of all declared edges
+      are extras-gated, which is why an unfiltered count puts test tooling above numpy.</li>
+  <li>Names are normalized per PEP&nbsp;503, so <code>Zope.Interface</code> and
+      <code>zope-interface</code> are one project.</li>
+</ul>
+
+<h2>Known limitations</h2>
+<ul>
+  <li>Yanked releases cannot be excluded. The source table carries no yank status, and
+      determining it would take one request per project.</li>
+  <li>Only declared dependencies count. Transitive dependencies are not resolved.</li>
+</ul>
+
+<h2>Data</h2>
+<p>The full ranked list is available as
+<a href="https://github.com/miketheman/top-pypi-dependents/blob/main/data/latest.json">JSON</a>.
+The complete dependency graph is published as a DuckDB database and a Parquet edge list on
+each <a href="https://github.com/miketheman/top-pypi-dependents/releases">release</a>.</p>
+{% endblock %}

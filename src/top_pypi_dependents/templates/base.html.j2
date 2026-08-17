@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Top PyPI Dependents{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fff; --muted: #666; --line: #ddd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e8e8; --bg: #16181c; --muted: #999; --line: #333; }
+  }
+  body { margin: 0 auto; max-width: 60rem; padding: 2rem 1rem; background: var(--bg);
+         color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  a { color: inherit; }
+  nav a { margin-right: 1rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid var(--line); padding: .4rem .6rem; text-align: left; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .up { color: #1a7f37; }
+  .down { color: #b3261e; }
+  .muted { color: var(--muted); }
+  input { width: 100%; padding: .5rem; margin: 1rem 0; font: inherit;
+          background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<nav>
+  <a href="index.html">About</a>
+  {% for tier in tiers %}<a href="top-{{ tier }}.html">Top {{ "{:,}".format(tier) }}</a>{% endfor %}
+</nav>
+{% block content %}{% endblock %}
+<footer class="muted">
+  <p>Generated {{ generated_at }} from {{ source }}.
+  {{ "{:,}".format(project_count) }} projects, {{ "{:,}".format(edge_count) }} edges.</p>
+</footer>
+</body>
+</html>
