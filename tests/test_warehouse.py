@@ -367,35 +367,33 @@ def test_snapshot_with_no_parseable_edges_skips_the_dependencies_insert() -> Non
     assert load_result.snapshot_id == 1
 
 
-class _FailAfterFirstExecuteMany:
-    """Wraps a real connection so the second ``executemany`` call raises.
+class _FailOnTheDependenciesInsert:
+    """Wraps a real connection so the ``dependencies`` insert raises.
 
-    ``load_snapshot`` makes exactly two ``executemany`` calls when a snapshot
-    has edges: one to insert ``projects``, one to insert ``dependencies``. This
-    fails the second, simulating a crash between them.
+    ``load_snapshot`` inserts ``projects`` first and ``dependencies`` second.
+    Failing the second simulates a crash between them, leaving the rollback as
+    the only thing between a half-loaded snapshot and the database.
     """
 
     def __init__(self, real: duckdb.DuckDBPyConnection) -> None:
         self._real = real
-        self._executemany_calls = 0
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._real, name)
 
-    def executemany(
+    def execute(
         self, query: str, parameters: object = None
     ) -> duckdb.DuckDBPyConnection:
-        self._executemany_calls += 1
-        if self._executemany_calls == 2:
+        if query.startswith("INSERT INTO dependencies"):
             msg = "simulated failure between the projects and dependencies inserts"
             raise RuntimeError(msg)
-        return self._real.executemany(query, parameters)
+        return self._real.execute(query, parameters)
 
 
 def test_load_snapshot_rolls_back_a_mid_load_failure() -> None:
     con = warehouse.connect(None)
     warehouse.create_schema(con)
-    wrapped = _FailAfterFirstExecuteMany(con)
+    wrapped = _FailOnTheDependenciesInsert(con)
 
     with pytest.raises(RuntimeError, match="simulated failure"):
         warehouse.load_snapshot(
