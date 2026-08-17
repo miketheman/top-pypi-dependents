@@ -1,8 +1,17 @@
 {% extends "base.html.j2" %}
 {% block content %}
 <h1>Top PyPI Dependents</h1>
-<p>Which PyPI projects does the rest of PyPI actually depend on? This ranks projects by
-the number of other projects that declare a dependency on them, refreshed monthly.</p>
+<p class="lede">Which PyPI projects does the rest of PyPI actually depend on? This ranks
+projects by the number of other projects that declare a dependency on them, refreshed
+monthly.</p>
+
+<svg class="ornament" width="120" height="16" viewBox="0 0 120 16" fill="none"
+    stroke="currentColor" aria-hidden="true">
+  <path d="M0 8h46" stroke-width="1"/>
+  <path d="M52 8c4-6 12-6 16 0-4 6-12 6-16 0z" stroke-width="1"/>
+  <path d="M52 8h16" stroke-width="0.6"/>
+  <path d="M74 8h46" stroke-width="1"/>
+</svg>
 
 <h2>How it is counted</h2>
 <ul>
@@ -10,10 +19,13 @@ the number of other projects that declare a dependency on them, refreshed monthl
       falling back to the highest prerelease for projects that have only prereleases.</li>
   <li>The headline number counts distinct projects declaring an <em>unconditional runtime</em>
       dependency. Dependencies gated behind an <code>extra</code> are counted separately, in
-      the "incl. extras" column. That distinction matters: roughly 37% of all declared edges
-      are extras-gated, which is why an unfiltered count puts test tooling above numpy.</li>
+      the &ldquo;incl. extras&rdquo; column. That distinction matters: roughly 37% of all
+      declared edges are extras-gated, which is why an unfiltered count puts test tooling
+      above numpy.</li>
   <li>Names are normalized per PEP&nbsp;503, so <code>Zope.Interface</code> and
       <code>zope-interface</code> are one project.</li>
+  <li>Only projects still live on PyPI are ranked, and only live projects count as
+      dependents.</li>
 </ul>
 
 <h2>Known limitations</h2>

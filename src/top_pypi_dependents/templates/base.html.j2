@@ -5,22 +5,203 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Top PyPI Dependents{% endblock %}</title>
 <style>
-  :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fff; --muted: #666; --line: #ddd; }
-  @media (prefers-color-scheme: dark) {
-    :root { --fg: #e8e8e8; --bg: #16181c; --muted: #999; --line: #333; }
+  /* Design system: miketheman.dev "herbarium sheet".
+    Warm paper and ink, one green, hairline rules, zero shadows.
+    Fonts are declared as the same stacks the .dev site uses but are NOT
+    fetched -- this page must stay self-contained -- so they fall back to
+    ui-serif / ui-sans-serif unless the reader has them installed. */
+  :root {
+    --paper: #f4f1ea;
+    --ink: #1c1a17;
+    --ink-muted: #5a554d;
+    --ink-subtle: #6b6559;
+    --rule: #d8d2c4;
+    --surface-hover: #ebe4d4;
+    --accent: #3f5a3a;
+
+    --serif: Petrona, ui-serif, Georgia, serif;
+    --sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+    --dur: 180ms;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  body { margin: 0 auto; max-width: 60rem; padding: 2rem 1rem; background: var(--bg);
-          color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14130f;
+      --ink: #ece7d9;
+      --ink-muted: #a6a094;
+      --ink-subtle: #90897d;
+      --rule: #2d2b26;
+      --surface-hover: #1e1c17;
+      --accent: #a2c087;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root { --dur: 0ms; }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0 auto;
+    max-width: 52rem;
+    padding: 1.5rem 1rem 3rem;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: clamp(1rem, 0.96rem + 0.20vw, 1.0625rem);
+    font-weight: 400;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
   a { color: inherit; }
-  nav a { margin-right: 1rem; }
+
+  /* Tracked caps for anything secondary. Never letterspace lowercase. */
+  .label {
+    font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .meta {
+    font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-subtle);
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 3rem;
+  }
+  nav a {
+    text-decoration: none;
+    font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    transition: color var(--dur) var(--ease);
+  }
+  nav a:hover { color: var(--ink); }
+
+  /* The single serif on the page. */
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2.0625rem, 1.77rem + 1.56vw, 2.875rem);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    margin: 0 0 0.75rem;
+  }
+
+  h2 {
+    font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 3rem 0 1rem;
+  }
+
+  p { max-width: 34rem; }
+  p.lede { color: var(--ink-muted); margin: 0 0 1.5rem; }
+
+  ul { max-width: 34rem; padding-left: 1.25rem; }
+  li { margin-bottom: 0.5rem; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+  }
+
+  /* The page's one decorative flourish, in the one green. */
+  .ornament { display: block; margin: 3rem auto 1.5rem; color: var(--accent); }
+
+  input[type="search"] {
+    width: 100%;
+    max-width: 24rem;
+    padding: 0.75rem 1rem;
+    margin: 0 0 1.5rem;
+    font: inherit;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    transition: border-color var(--dur) var(--ease);
+  }
+  input[type="search"]::placeholder { color: var(--ink-subtle); }
+  input[type="search"]:hover { border-color: var(--ink-muted); }
+
   table { border-collapse: collapse; width: 100%; }
-  th, td { border-bottom: 1px solid var(--line); padding: .4rem .6rem; text-align: left; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .up { color: #1a7f37; }
-  .down { color: #b3261e; }
-  .muted { color: var(--muted); }
-  input { width: 100%; padding: .5rem; margin: 1rem 0; font: inherit;
-          background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+
+  thead th {
+    font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    text-align: left;
+    padding: 0 0.75rem 0.75rem;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody tr { transition: background-color var(--dur) var(--ease); }
+  tbody tr:hover { background: var(--surface-hover); }
+
+  tbody td a { text-decoration: none; border-bottom: 1px solid var(--rule); }
+  tbody tr:hover td a { border-bottom-color: var(--ink-muted); }
+
+  /* The Tabular Date Rule, generalized: every number in a column aligns. */
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  th.num { text-align: right; }
+
+  td.rank { color: var(--ink-subtle); width: 1%; }
+  td.move { color: var(--ink-muted); width: 1%; }
+  td.move .flat, td.move .new { color: var(--ink-subtle); }
+
+  /* A fifth job for the accent, deliberately granted: a climb is growth, which
+    is the metaphor the green already carries. A drop stays in muted ink -- a
+    red would be a second chromatic voice, which this system rejects. The
+    glyph, not the color, is what makes direction unambiguous. */
+  td.move .up { color: var(--accent); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-subtle);
+  }
+  footer p { margin: 0.25rem 0; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  @media (max-width: 34rem) {
+    thead th, tbody td { padding: 0.6rem 0.4rem; }
+    .hide-narrow { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -29,9 +210,9 @@
   {% for tier in tiers %}<a href="top-{{ tier }}.html">Top {{ "{:,}".format(tier) }}</a>{% endfor %}
 </nav>
 {% block content %}{% endblock %}
-<footer class="muted">
-  <p>Generated {{ generated_at }} from {{ source }}.
-  {{ "{:,}".format(project_count) }} projects, {{ "{:,}".format(edge_count) }} edges.</p>
+<footer>
+  <p class="meta">Generated {{ generated_at }} from {{ source }}.</p>
+  <p class="meta">{{ "{:,}".format(project_count) }} projects &middot; {{ "{:,}".format(edge_count) }} dependency edges.</p>
 </footer>
 </body>
 </html>

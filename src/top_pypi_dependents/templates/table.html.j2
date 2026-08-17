@@ -1,29 +1,43 @@
 {% extends "base.html.j2" %}
 {% block title %}Top {{ "{:,}".format(tier) }} PyPI Dependents{% endblock %}
 {% block content %}
-<h1>Top {{ "{:,}".format(tier) }} PyPI projects by dependent count</h1>
-<p class="muted">Ranked by how many projects declare an unconditional runtime dependency
-on them, using each project's latest release.</p>
-<input id="filter" type="search" placeholder="Filter by project name" autocomplete="off">
+<h1>Top {{ "{:,}".format(tier) }}</h1>
+<p class="lede">PyPI projects ranked by how many other projects declare an unconditional
+runtime dependency on them, read from each project's latest release.</p>
+
+<svg class="ornament" width="120" height="16" viewBox="0 0 120 16" fill="none"
+    stroke="currentColor" aria-hidden="true">
+  <path d="M0 8h46" stroke-width="1"/>
+  <path d="M52 8c4-6 12-6 16 0-4 6-12 6-16 0z" stroke-width="1"/>
+  <path d="M52 8h16" stroke-width="0.6"/>
+  <path d="M74 8h46" stroke-width="1"/>
+</svg>
+
+<label class="label" for="filter">Filter</label>
+<input id="filter" type="search" placeholder="Project name" autocomplete="off">
+
 <table id="rows">
   <thead>
     <tr>
-      <th class="num">#</th><th>Project</th>
-      <th class="num">Dependents</th><th class="num">Incl. extras</th><th>Change</th>
+      <th class="num">#</th>
+      <th>Project</th>
+      <th class="num">Dependents</th>
+      <th class="num hide-narrow">Incl. extras</th>
+      <th class="num">Change</th>
     </tr>
   </thead>
   <tbody>
   {% for row in rows %}
     <tr>
-      <td class="num">{{ row.rank }}</td>
+      <td class="num rank">{{ row.rank }}</td>
       <td><a href="https://pypi.org/project/{{ row.project }}/">{{ row.project }}</a></td>
       <td class="num">{{ "{:,}".format(row.dependents) }}</td>
-      <td class="num">{{ "{:,}".format(row.dependents_all) }}</td>
-      <td>
-      {%- if row.rank_change is none %}<span class="muted">new</span>
+      <td class="num hide-narrow">{{ "{:,}".format(row.dependents_all) }}</td>
+      <td class="num move">
+      {%- if row.rank_change is none %}<span class="new">new</span>
       {%- elif row.rank_change > 0 %}<span class="up">&#9650; {{ row.rank_change }}</span>
-      {%- elif row.rank_change < 0 %}<span class="down">&#9660; {{ -row.rank_change }}</span>
-      {%- else %}<span class="muted">&ndash;</span>{% endif %}
+      {%- elif row.rank_change < 0 %}<span class="dn">&#9660; {{ -row.rank_change }}</span>
+      {%- else %}<span class="flat">&ndash;</span>{% endif -%}
       </td>
     </tr>
   {% endfor %}
