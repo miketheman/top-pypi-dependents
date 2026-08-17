@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
     import duckdb
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _ROWS_SQL = """
 SELECT
@@ -21,9 +21,11 @@ SELECT
     r.dependents_runtime,
     r.dependents_all
 FROM rankings AS r
--- Fewer than `limit` rows when fewer projects than that have a runtime
--- dependent at all: a rank with a zero count is not a ranking.
-WHERE r.snapshot_id = ? AND r.dependents_runtime > 0
+-- Fewer than `limit` rows when fewer projects clear `min_dependents`: a rank
+-- with a zero count is not a ranking, and the single-dependent tail is over
+-- half the file. Rows are ordered by count, so this truncates a contiguous
+-- tail rather than punching holes -- ranks stay 1..N with no gaps.
+WHERE r.snapshot_id = ? AND r.dependents_runtime >= ?
 ORDER BY r.rank_runtime
 LIMIT ?
 """
@@ -45,6 +47,7 @@ def build_payload(
     snapshot_id: int,
     *,
     limit: int,
+    min_dependents: int,
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Assemble the JSON payload, including rank movement against ``previous``."""
@@ -61,7 +64,7 @@ def build_payload(
 
     rows = []
     for rank, name, runtime, all_count in con.execute(
-        _ROWS_SQL, [snapshot_id, limit]
+        _ROWS_SQL, [snapshot_id, min_dependents, limit]
     ).fetchall():
         prior = prior_ranks.get(name)
         rows.append(
@@ -82,6 +85,7 @@ def build_payload(
         "counting": {
             "basis": "latest non-prerelease release",
             "ranked_on": "runtime",
+            "min_dependents": min_dependents,
         },
         "previous_generated_at": (
             None if previous is None else previous.get("generated_at")
@@ -93,10 +97,18 @@ def build_payload(
 
 
 def write_json(payload: dict[str, Any], path: Path) -> None:
-    """Write the payload deterministically, so git diffs stay readable."""
+    """Write the payload deterministically and compactly.
+
+    Key order is insertion order, never sorted, so two runs over the same data
+    produce byte-identical files. Indentation is dropped because this file is
+    committed every month and git stores a whole new blob each time: pretty
+    printing cost 5 MB of an 18 MB artifact, for whitespace no one reads at
+    this row count.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8"
+        json.dumps(payload, separators=(",", ":"), sort_keys=False) + "\n",
+        encoding="utf-8",
     )
 
 

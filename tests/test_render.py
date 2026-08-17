@@ -26,6 +26,7 @@ def payload() -> dict:
         con,
         snapshot_id,
         limit=50,
+        min_dependents=1,
         previous={
             "generated_at": "2026-08-01T00:00:00+00:00",
             "rows": [{"rank": 4, "project": "requests"}],
@@ -73,3 +74,25 @@ def test_index_states_the_methodology(tmp_path: Path, payload: dict) -> None:
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "yanked" in html.lower()
     assert "extra" in html.lower()
+
+
+def test_footer_shows_a_readable_date(tmp_path: Path, payload: dict) -> None:
+    """A microsecond ISO timestamp is machine detail; the page is for people."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "September 1, 2026" in text
+    assert "2026-09-01T00:00:00+00:00" not in text
+
+
+def test_footer_names_a_bigquery_source_in_prose(tmp_path: Path, payload: dict) -> None:
+    render.render_site({**payload, "source": "bigquery"}, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "PyPI metadata on BigQuery" in text
+
+
+def test_footer_names_the_fixture_source_in_prose(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "the checked-in fixture" in text

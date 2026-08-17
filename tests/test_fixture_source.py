@@ -86,3 +86,14 @@ def test_live_names_are_canonical_and_exclude_deleted(source: FixtureSource) -> 
 
 def test_source_reports_its_name(source: FixtureSource) -> None:
     assert source.name == "fixture"
+
+
+def test_recorded_provenance_overrides_the_default_name(tmp_path: Path) -> None:
+    """`extract` writes real BigQuery data through this class; saying "fixture"
+    in a published artifact would be a lie about where the data came from."""
+    (tmp_path / "source.txt").write_text("bigquery\n", encoding="utf-8")
+    assert FixtureSource(tmp_path).name == "bigquery"
+
+
+def test_name_falls_back_to_fixture_without_a_provenance_file(tmp_path: Path) -> None:
+    assert FixtureSource(tmp_path).name == "fixture"

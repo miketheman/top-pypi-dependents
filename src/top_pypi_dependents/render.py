@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
@@ -11,6 +12,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 TIERS: tuple[int, ...] = (100, 1000, 10000)
+
+# The payload keeps the full ISO timestamp for machines. The page is read by
+# people, for whom microseconds and a UTC offset are noise on a dataset that
+# only moves once a month.
+_SOURCE_LABELS = {
+    "bigquery": "PyPI metadata on BigQuery",
+    "fixture": "the checked-in fixture",
+}
+
+
+def _readable_date(generated_at: str) -> str:
+    """Format the payload's ISO timestamp for a human, or pass it through."""
+    try:
+        moment = datetime.fromisoformat(generated_at).astimezone(UTC)
+    except ValueError:
+        return generated_at
+    return f"{moment:%B} {moment.day}, {moment.year}"
 
 
 def _environment() -> Environment:
@@ -33,8 +51,8 @@ def render_site(
     env = _environment()
     shared = {
         "tiers": list(tiers),
-        "generated_at": payload["generated_at"],
-        "source": payload["source"],
+        "generated_at": _readable_date(payload["generated_at"]),
+        "source": _SOURCE_LABELS.get(payload["source"], payload["source"]),
         "project_count": payload["project_count"],
         "edge_count": payload["edge_count"],
     }

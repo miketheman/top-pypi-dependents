@@ -38,6 +38,17 @@ class FixtureSource:
 
     @property
     def name(self) -> str:
+        """Where the data came from, which is not what format it is in.
+
+        This class reads the JSONL layout, and `extract` writes exactly that
+        layout from BigQuery -- so the class serves production too, and a run
+        that reported "fixture" published a lie about its own provenance.
+        `extract` records the truth in `source.txt`; the checked-in corpus has
+        no such file and keeps the default.
+        """
+        recorded = self._directory / "source.txt"
+        if recorded.exists():
+            return recorded.read_text(encoding="utf-8").strip() or "fixture"
         return "fixture"
 
     def winners(self) -> list[Winner]:

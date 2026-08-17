@@ -31,15 +31,60 @@ def con_and_snapshot() -> ConAndSnapshot:
 
 def test_payload_header_fields(con_and_snapshot: ConAndSnapshot) -> None:
     con, snapshot_id = con_and_snapshot
-    payload = artifacts.build_payload(con, snapshot_id, limit=100, previous=None)
-    assert payload["schema_version"] == 1
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=100, min_dependents=1, previous=None
+    )
+    assert payload["schema_version"] == 2
     assert payload["source"] == "fixture"
     assert payload["generated_at"] == "2026-09-01T00:00:00+00:00"
     assert payload["counting"] == {
         "basis": "latest non-prerelease release",
         "ranked_on": "runtime",
+        "min_dependents": 1,
     }
     assert payload["previous_generated_at"] is None
+
+
+def test_rows_below_the_minimum_dependent_count_are_excluded(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    """Over half of a real payload is single-dependent projects; they cost 55%."""
+    con, snapshot_id = con_and_snapshot
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=100, min_dependents=2, previous=None
+    )
+    names = [row["project"] for row in payload["rows"]]
+    assert names == ["requests"]
+    # django and urllib3 each have exactly one runtime dependent.
+    assert "django" not in names
+
+
+def test_counting_records_the_minimum_dependent_count(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    """A consumer cannot tell a short tail from a truncated one without this."""
+    con, snapshot_id = con_and_snapshot
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=100, min_dependents=2, previous=None
+    )
+    assert payload["counting"]["min_dependents"] == 2
+
+
+def test_write_json_is_compact(
+    con_and_snapshot: ConAndSnapshot, tmp_path: Path
+) -> None:
+    """Indentation cost 5 MB of an 18 MB artifact committed every month."""
+    con, snapshot_id = con_and_snapshot
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=100, min_dependents=1, previous=None
+    )
+    path = tmp_path / "latest.json"
+    artifacts.write_json(payload, path)
+    text = path.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert text.count("\n") == 1
+    assert ", " not in text
+    assert json.loads(text) == payload
 
 
 def test_generated_at_is_utc_regardless_of_session_timezone(
@@ -47,14 +92,18 @@ def test_generated_at_is_utc_regardless_of_session_timezone(
 ) -> None:
     con, snapshot_id = con_and_snapshot
     con.execute("SET TimeZone = 'America/New_York'")
-    payload = artifacts.build_payload(con, snapshot_id, limit=1, previous=None)
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=1, min_dependents=1, previous=None
+    )
     assert payload["generated_at"] == "2026-09-01T00:00:00+00:00"
     assert payload["generated_at"].endswith("+00:00")
 
 
 def test_rows_are_ranked_and_capped(con_and_snapshot: ConAndSnapshot) -> None:
     con, snapshot_id = con_and_snapshot
-    payload = artifacts.build_payload(con, snapshot_id, limit=3, previous=None)
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=3, min_dependents=1, previous=None
+    )
     assert len(payload["rows"]) == 3
     assert payload["rows"][0]["rank"] == 1
     assert payload["rows"][0]["project"] == "requests"
@@ -67,7 +116,9 @@ def test_projects_with_no_runtime_dependent_are_left_out(
 ) -> None:
     """Spec: top 100,000, or fewer if fewer projects have a runtime dependent."""
     con, snapshot_id = con_and_snapshot
-    payload = artifacts.build_payload(con, snapshot_id, limit=100, previous=None)
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=100, min_dependents=1, previous=None
+    )
     names = [row["project"] for row in payload["rows"]]
     assert all(row["dependents"] > 0 for row in payload["rows"])
     # pytest is depended on only behind an extra: 0 runtime, 1 including extras.
@@ -83,7 +134,9 @@ def test_rank_change_is_positive_when_a_project_climbs(
         "generated_at": "2026-08-01T00:00:00+00:00",
         "rows": [{"rank": 4, "project": "requests"}],
     }
-    payload = artifacts.build_payload(con, snapshot_id, limit=5, previous=previous)
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=5, min_dependents=1, previous=previous
+    )
     row = next(r for r in payload["rows"] if r["project"] == "requests")
     assert row["previous_rank"] == 4
     assert row["rank_change"] == 3
@@ -98,7 +151,9 @@ def test_write_json_round_trips(
     tmp_path: Path, con_and_snapshot: ConAndSnapshot
 ) -> None:
     con, snapshot_id = con_and_snapshot
-    payload = artifacts.build_payload(con, snapshot_id, limit=5, previous=None)
+    payload = artifacts.build_payload(
+        con, snapshot_id, limit=5, min_dependents=1, previous=None
+    )
     path = tmp_path / "latest.json"
     artifacts.write_json(payload, path)
     assert json.loads(path.read_text(encoding="utf-8")) == payload
