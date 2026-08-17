@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import http
 import json
+import logging
 from importlib.resources import files
 from typing import TYPE_CHECKING, Any
+
+from top_pypi_dependents import log
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from pathlib import Path
+
+LOGGER = logging.getLogger(__name__)
+
+# Row and byte intervals for progress lines inside the two loops long enough to
+# look hung: ~1M winner rows, and a ~42 MB index stream.
+_PROGRESS_EVERY = 50_000
+_PROGRESS_BYTES = 25 * 1024**2
 
 TABLE = "bigquery-public-data.pypi.distribution_metadata"
 SIMPLE_INDEX = "https://pypi.org/simple/"
@@ -48,22 +58,46 @@ EXPECTED_COLUMNS = frozenset(
 )
 
 
-def write_winners(out_dir: Path, rows: Iterable[Mapping[str, Any]]) -> None:
-    """Write winner rows as JSONL, in the shape ``FixtureSource`` reads."""
+def write_winners(out_dir: Path, rows: Iterable[Mapping[str, Any]]) -> int:
+    """Write winner rows as JSONL, in the shape ``FixtureSource`` reads.
+
+    Returns the row count. ``rows`` is a lazy cursor over roughly a million
+    rows, so this is the only place that number can be known without buying it
+    twice, and the count is what tells a watched run it is still moving.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
     with (out_dir / "winners.jsonl").open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(dict(row), default=str) + "\n")
+            written += 1
+            if written % _PROGRESS_EVERY == 0:
+                LOGGER.debug("winners: %s rows written", f"{written:,}")
+    return written
 
 
-def write_audit_sample(out_dir: Path, rows: Iterable[Mapping[str, Any]]) -> None:
-    """Write the audit sample as JSONL."""
+def write_audit_sample(out_dir: Path, rows: Iterable[Mapping[str, Any]]) -> int:
+    """Write the audit sample as JSONL. Returns the row count."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
     with (out_dir / "audit_sample.jsonl").open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(
                 json.dumps({"name": row["name"], "version": row["version"]}) + "\n"
             )
+            written += 1
+    return written
+
+
+def write_source(out_dir: Path) -> None:
+    """Record that this directory holds BigQuery data, not the checked-in corpus.
+
+    `build` reads these files through `FixtureSource`, which names the JSONL
+    layout rather than any particular origin. Without this marker the published
+    payload and the rendered footer both claim a source of "fixture".
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "source.txt").write_text("bigquery\n", encoding="utf-8")
 
 
 def fetch_live_names(out_dir: Path) -> int:
@@ -98,8 +132,12 @@ def fetch_live_names(out_dir: Path) -> int:
         # and exhaust the runner's memory. See MAX_INDEX_BYTES for the cap.
         chunks = []
         total = 0
+        logged = 0
         for chunk in response.stream(1024 * 1024):
             total += len(chunk)
+            if total - logged >= _PROGRESS_BYTES:
+                logged = total
+                LOGGER.debug("live names: %.0f MiB streamed", total / 1024**2)
             if total > MAX_INDEX_BYTES:
                 msg = (
                     f"GET {SIMPLE_INDEX} exceeded the {MAX_INDEX_BYTES:,} byte cap "
@@ -143,6 +181,7 @@ def extract_to_directory(
     from google.cloud import bigquery  # noqa: PLC0415  # ty: ignore[unresolved-import]
 
     client = bigquery.Client(project=project)
+    LOGGER.info("validating %s against the expected schema", TABLE)
     _validate_schema(client, TABLE)
 
     if dry_run:
@@ -158,13 +197,32 @@ def extract_to_directory(
         return 0
 
     config = bigquery.QueryJobConfig(maximum_bytes_billed=MAX_BYTES_BILLED)
-    write_winners(
-        out_dir,
-        (dict(row) for row in client.query(WINNERS_SQL, job_config=config).result()),
-    )
-    write_audit_sample(
-        out_dir,
-        (dict(row) for row in client.query(AUDIT_SQL, job_config=config).result()),
-    )
-    fetch_live_names(out_dir)
+
+    with log.stage(LOGGER, "extract.winners") as outcome:
+        job = client.query(WINNERS_SQL, job_config=config)
+        rows = job.result()
+        _log_billing(job)
+        outcome["rows"] = write_winners(out_dir, (dict(row) for row in rows))
+
+    with log.stage(LOGGER, "extract.audit") as outcome:
+        job = client.query(AUDIT_SQL, job_config=config)
+        rows = job.result()
+        _log_billing(job)
+        outcome["rows"] = write_audit_sample(out_dir, (dict(row) for row in rows))
+
+    with log.stage(LOGGER, "extract.live-names") as outcome:
+        outcome["names"] = fetch_live_names(out_dir)
+
+    write_source(out_dir)
     return 0
+
+
+def _log_billing(job: Any) -> None:  # noqa: ANN401  # google's QueryJob, imported lazily
+    """Report what a finished query actually cost, cache hits included."""
+    processed = job.total_bytes_processed or 0
+    LOGGER.info(
+        "scanned %.2f GiB (billed %.2f GiB, cache_hit=%s)",
+        processed / 1024**3,
+        (job.total_bytes_billed or 0) / 1024**3,
+        job.cache_hit,
+    )

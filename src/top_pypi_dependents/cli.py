@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from top_pypi_dependents import artifacts, render, warehouse
+from top_pypi_dependents import artifacts, log, render, warehouse
 from top_pypi_dependents.sources.fixture import FixtureSource
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
+LOGGER = logging.getLogger(__name__)
+
 DEFAULT_LIMIT = 100_000
+# Single-dependent projects were 54% of the first real payload's rows and 55%
+# of its bytes, and a project with one dependent says little about what the
+# ecosystem depends on. Fixture runs pass `--min-dependents 1`, because the
+# fixture's whole corpus is three ranked projects, two of them singletons.
+DEFAULT_MIN_DEPENDENTS = 2
 # The top-ranked project's dependent count moves by a percent or two a month.
 # Halving means the graph collapsed -- most commonly because /simple/ came back
 # short, so most dependents stopped being live and stopped voting -- and the
@@ -24,22 +32,26 @@ MIN_TOP_DEPENDENTS_RATIO = 0.5
 
 
 def _build(args: argparse.Namespace) -> int:
-    con = warehouse.connect(Path(args.database))
-    warehouse.create_schema(con)
-    load_result = warehouse.load_snapshot(
-        con,
-        source=FixtureSource(Path(args.input)),
-        captured_at=datetime.now(tz=UTC),
-        floors=warehouse.Floors(
-            winners=args.min_projects,
-            live_names=args.min_projects,
-            audit_sample=args.min_audit_sample,
-        ),
-    )
-    snapshot_id = load_result.snapshot_id
-    warehouse.compute_rankings(con, snapshot_id)
-    snapshot = warehouse.snapshot(con, snapshot_id)
-    con.close()
+    with log.stage(LOGGER, "build") as outcome:
+        con = warehouse.connect(Path(args.database))
+        warehouse.create_schema(con)
+        load_result = warehouse.load_snapshot(
+            con,
+            source=FixtureSource(Path(args.input)),
+            captured_at=datetime.now(tz=UTC),
+            floors=warehouse.Floors(
+                winners=args.min_projects,
+                live_names=args.min_projects,
+                audit_sample=args.min_audit_sample,
+            ),
+        )
+        snapshot_id = load_result.snapshot_id
+        warehouse.compute_rankings(con, snapshot_id)
+        snapshot = warehouse.snapshot(con, snapshot_id)
+        con.close()
+        if snapshot is not None:
+            outcome["projects"] = snapshot.project_count
+            outcome["edges"] = snapshot.edge_count
     if snapshot is None:
         msg = f"snapshot {snapshot_id} vanished immediately after being written"
         raise SystemExit(msg)
@@ -107,20 +119,27 @@ def _artifacts(args: argparse.Namespace) -> int:
         msg = "database contains no snapshots; run `build` first"
         raise SystemExit(msg)
     out = Path(args.output)
-    previous = artifacts.read_payload(out)
-    payload = artifacts.build_payload(
-        con,
-        snapshot.snapshot_id,
-        limit=args.limit,
-        previous=_deltas_baseline(previous, snapshot.captured_at),
-    )
-    # Checked against the payload on disk even when it is this month's own, so a
-    # retry still notices a collapse between the two runs.
-    _check_top_row_has_not_collapsed(payload, previous)
-    artifacts.write_json(payload, out)
-    if args.edges:
-        artifacts.export_edges(con, snapshot.snapshot_id, Path(args.edges))
-    con.close()
+    with log.stage(LOGGER, "artifacts") as outcome:
+        previous = artifacts.read_payload(out)
+        LOGGER.debug("rank movement baseline: %s", "none" if previous is None else out)
+        payload = artifacts.build_payload(
+            con,
+            snapshot.snapshot_id,
+            limit=args.limit,
+            min_dependents=args.min_dependents,
+            previous=_deltas_baseline(previous, snapshot.captured_at),
+        )
+        # Checked against the payload on disk even when it is this month's own,
+        # so a retry still notices a collapse between the two runs.
+        _check_top_row_has_not_collapsed(payload, previous)
+        artifacts.write_json(payload, out)
+        outcome["rows"] = len(payload["rows"])
+        outcome["bytes"] = out.stat().st_size
+        if args.edges:
+            edges = Path(args.edges)
+            artifacts.export_edges(con, snapshot.snapshot_id, edges)
+            outcome["edge_bytes"] = edges.stat().st_size
+        con.close()
     return 0
 
 
@@ -134,7 +153,9 @@ def _render(args: argparse.Namespace) -> int:
     except ValueError:
         msg = f"--tiers must be a comma-separated list of integers, not {args.tiers!r}"
         raise SystemExit(msg) from None
-    render.render_site(payload, Path(args.output), tiers=tiers)
+    with log.stage(LOGGER, "render") as outcome:
+        render.render_site(payload, Path(args.output), tiers=tiers)
+        outcome["pages"] = len(tiers) + 1
     return 0
 
 
@@ -152,6 +173,12 @@ def _extract(args: argparse.Namespace) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="top-pypi-dependents")
+    parser.add_argument(
+        "--log-level",
+        choices=log.LEVELS,
+        default="info",
+        help="verbosity of the progress log on stderr (default info)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     extract = sub.add_parser(
@@ -188,6 +215,15 @@ def _parser() -> argparse.ArgumentParser:
     art.add_argument("--database", default="build/dependents.duckdb")
     art.add_argument("--output", default="data/latest.json")
     art.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    art.add_argument(
+        "--min-dependents",
+        type=int,
+        default=DEFAULT_MIN_DEPENDENTS,
+        help=(
+            "omit projects with fewer than this many runtime dependents "
+            f"(default {DEFAULT_MIN_DEPENDENTS}); fixture runs pass 1"
+        ),
+    )
     art.add_argument("--edges", default=None, help="path for the Parquet edge export")
     art.set_defaults(func=_artifacts)
 
@@ -205,6 +241,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse arguments and dispatch to a stage."""
     args = _parser().parse_args(argv)
+    log.configure(args.log_level)
     try:
         return int(args.func(args))
     except warehouse.ImplausibleRunError as exc:

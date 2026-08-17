@@ -248,3 +248,20 @@ def test_fetch_live_names_raises_when_the_body_exceeds_the_cap(
     with pytest.raises(RuntimeError, match="10"):
         bigquery.fetch_live_names(tmp_path)
     assert fake.released
+
+
+def test_write_source_records_the_provenance(tmp_path: Path) -> None:
+    """Without this the published payload calls BigQuery data "fixture"."""
+    bigquery.write_source(tmp_path)
+    assert (tmp_path / "source.txt").read_text(encoding="utf-8") == "bigquery\n"
+
+
+def test_write_winners_returns_the_row_count(tmp_path: Path) -> None:
+    """The count is what `extract` logs; a stage duration alone says nothing."""
+    rows = [{"name": "a", "version": "1"}, {"name": "b", "version": "2"}]
+    assert bigquery.write_winners(tmp_path, rows) == 2
+
+
+def test_write_audit_sample_returns_the_row_count(tmp_path: Path) -> None:
+    rows = [{"name": "a", "version": "1"}, {"name": "b", "version": "2"}]
+    assert bigquery.write_audit_sample(tmp_path, rows) == 2

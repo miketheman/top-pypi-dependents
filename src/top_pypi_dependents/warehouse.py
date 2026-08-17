@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC
 from typing import TYPE_CHECKING
@@ -9,8 +10,11 @@ from typing import TYPE_CHECKING
 import duckdb
 import pyarrow as pa
 
+from top_pypi_dependents import log
 from top_pypi_dependents.normalize import canonical, parse_requirement
 from top_pypi_dependents.versions import Disagreement, audit
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -251,13 +255,21 @@ def load_snapshot(
     Raises ``ImplausibleRunError`` or ``AuditFailedError`` before writing
     anything.
     """
-    winners = source.winners()
+    with log.stage(LOGGER, "load.winners") as outcome:
+        winners = source.winners()
+        outcome["winners"] = len(winners)
     _require_at_least(len(winners), floors.winners, "winners returned by the source")
 
     sql_picks = {w.canonical_name: w.version for w in winners}
-    sample = source.audit_sample()
-    _require_at_least(len(sample), floors.audit_sample, "projects in the audit sample")
-    result = audit(sample, sql_picks)
+    with log.stage(LOGGER, "load.audit") as outcome:
+        sample = source.audit_sample()
+        _require_at_least(
+            len(sample), floors.audit_sample, "projects in the audit sample"
+        )
+        result = audit(sample, sql_picks)
+        outcome["sampled"] = len(sample)
+        outcome["skipped"] = result.skipped
+        outcome["disagreements"] = len(result.disagreements)
     if result.disagreements:
         raise AuditFailedError(result.disagreements)
     max_skipped = floors.max_audit_skip_fraction * len(sample)
@@ -302,7 +314,9 @@ def load_snapshot(
             )
             for w in winners
         ]
-        _insert_arrow(con, "projects", PROJECTS_ARROW_SCHEMA, project_rows)
+        with log.stage(LOGGER, "insert.projects") as outcome:
+            _insert_arrow(con, "projects", PROJECTS_ARROW_SCHEMA, project_rows)
+            outcome["rows"] = len(project_rows)
 
         edge_rows = []
         unparsed = 0
@@ -324,7 +338,15 @@ def load_snapshot(
                         parsed.is_runtime,
                     )
                 )
-        _insert_arrow(con, "dependencies", DEPENDENCIES_ARROW_SCHEMA, edge_rows)
+        if unparsed:
+            LOGGER.warning(
+                "%s of %s requirements did not parse and became no edge",
+                f"{unparsed:,}",
+                f"{unparsed + len(edge_rows):,}",
+            )
+        with log.stage(LOGGER, "insert.dependencies") as outcome:
+            _insert_arrow(con, "dependencies", DEPENDENCIES_ARROW_SCHEMA, edge_rows)
+            outcome["rows"] = len(edge_rows)
 
         con.execute(
             "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?)",
@@ -379,5 +401,6 @@ FROM counted
 
 def compute_rankings(con: duckdb.DuckDBPyConnection, snapshot_id: int) -> None:
     """Populate ``rankings`` for one snapshot. Safe to call more than once."""
-    con.execute("DELETE FROM rankings WHERE snapshot_id = ?", [snapshot_id])
-    con.execute(RANKINGS_SQL, [snapshot_id, snapshot_id, snapshot_id])
+    with log.stage(LOGGER, "rankings"):
+        con.execute("DELETE FROM rankings WHERE snapshot_id = ?", [snapshot_id])
+        con.execute(RANKINGS_SQL, [snapshot_id, snapshot_id, snapshot_id])
