@@ -18,4 +18,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      # Everything except pre-commit configs. This repo runs prek, whose
+      # `repo: builtin` shorthand is not in upstream pre-commit's schema, so
+      # zizmor cannot deserialize .pre-commit-config.yaml and aborts the whole
+      # audit before it reaches a single workflow.
       - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          collect: workflows,actions,dependabot
