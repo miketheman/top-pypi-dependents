@@ -2247,11 +2247,22 @@ This task is not exercised against live BigQuery in CI. Its tests check the SQL 
 
 ```sql
 -- One selected release per project, with the dependency metadata to read from it.
--- Sort key ordering, most significant first:
---   is_final | epoch | release | pre_rank | pre_num | post | dev
--- Every component is zero-padded to a fixed width, so string comparison and
--- numeric comparison agree.
-WITH per_file AS (
+--
+-- Version ordering is decomposed into typed INT64 columns rather than a packed,
+-- zero-padded string key. BigQuery compares integers natively; the components stay
+-- readable when a pick looks wrong; and no LPAD width can silently truncate an
+-- unusually long release segment (LPAD truncates rather than erroring).
+--
+-- Significance order, most significant first:
+--   is_final, epoch, rel1..rel6, pre_rank, pre_num, post_rank, post_num, dev_rank, dev_num
+--
+-- is_final leads so any final release outranks any prerelease -- Warehouse's
+-- `ORDER BY is_prerelease ASC`. The rest reproduce packaging's own sort key
+-- (epoch, release, pre, post, dev), where an absent pre segment sorts as -inf for a
+-- dev-only version and +inf for a final one, an absent post sorts as -inf, and an
+-- absent dev sorts as +inf. Note post-releases are FINAL, not prereleases:
+-- 1.0.post1 must outrank 1.0.
+WITH parsed AS (
   SELECT
     name,
     version,
@@ -2261,62 +2272,52 @@ WITH per_file AS (
     requires_python,
     LOWER(REGEXP_REPLACE(name, r'[-_.]+', '-')) AS canonical_name,
     IFNULL(SAFE_CAST(REGEXP_EXTRACT(version, r'^(\d+)!') AS INT64), 0) AS epoch,
-    REGEXP_REPLACE(version, r'^\d+!', '') AS tail
+    IFNULL(
+      REGEXP_EXTRACT(REGEXP_REPLACE(version, r'^\d+!', ''), r'^(\d+(?:\.\d+)*)'), '0'
+    ) AS release_seg,
+    IFNULL(
+      REGEXP_EXTRACT(REGEXP_REPLACE(version, r'^\d+!', ''), r'^\d+(?:\.\d+)*(.*)$'), ''
+    ) AS suffix
   FROM `bigquery-public-data.pypi.distribution_metadata`
 ),
-segmented AS (
+-- Alternations are ordered longest-first (alpha before a, preview before pre)
+-- so RE2's leftmost-first matching cannot stop at the short branch.
+scored AS (
   SELECT
     *,
-    IFNULL(REGEXP_EXTRACT(tail, r'^(\d+(?:\.\d+)*)'), '0') AS release_seg,
-    IFNULL(REGEXP_EXTRACT(tail, r'^\d+(?:\.\d+)*(.*)$'), tail) AS suffix
-  FROM per_file
-),
-flagged AS (
-  SELECT
-    *,
+    SPLIT(release_seg, '.') AS rel,
     CASE
-      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(a|alpha)\d*') THEN 1
-      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(b|beta)\d*') THEN 2
-      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(c|rc|pre|preview)\d*') THEN 3
+      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(alpha|a)\d*') THEN 1
+      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(beta|b)\d*') THEN 2
+      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?(preview|pre|rc|c)\d*') THEN 3
+      WHEN REGEXP_CONTAINS(suffix, r'(?i)^[._-]?dev\d*') THEN 0
       ELSE 4
     END AS pre_rank,
     IFNULL(
       SAFE_CAST(
-        REGEXP_EXTRACT(suffix, r'(?i)^[._-]?(?:a|b|c|rc|alpha|beta|pre|preview)[._-]?(\d+)')
-        AS INT64
+        REGEXP_EXTRACT(
+          suffix, r'(?i)^[._-]?(?:alpha|beta|preview|pre|rc|a|b|c)[._-]?(\d+)'
+        ) AS INT64
       ), 0
     ) AS pre_num,
-    IFNULL(
-      SAFE_CAST(REGEXP_EXTRACT(suffix, r'(?i)post[._-]?(\d+)') AS INT64), 0
-    ) AS post_num,
-    IF(REGEXP_CONTAINS(suffix, r'(?i)post'), 1, 0) AS has_post,
-    IF(REGEXP_CONTAINS(suffix, r'(?i)dev'), 0, 1) AS not_dev,
-    IFNULL(
-      SAFE_CAST(REGEXP_EXTRACT(suffix, r'(?i)dev[._-]?(\d+)') AS INT64), 0
-    ) AS dev_num
-  FROM segmented
+    IF(REGEXP_CONTAINS(suffix, r'(?i)post'), 1, 0) AS post_rank,
+    IFNULL(SAFE_CAST(REGEXP_EXTRACT(suffix, r'(?i)post[._-]?(\d+)') AS INT64), 0) AS post_num,
+    IF(REGEXP_CONTAINS(suffix, r'(?i)dev'), 0, 1) AS dev_rank,
+    IFNULL(SAFE_CAST(REGEXP_EXTRACT(suffix, r'(?i)dev[._-]?(\d+)') AS INT64), 0) AS dev_num
+  FROM parsed
 ),
 keyed AS (
   SELECT
     *,
-    FORMAT(
-      '%d|%010d|%s|%d|%010d|%d%010d|%d%010d',
-      IF(pre_rank = 4 AND not_dev = 1, 1, 0),
-      epoch,
-      (
-        SELECT STRING_AGG(LPAD(seg, 10, '0'), '' ORDER BY off)
-        FROM UNNEST(SPLIT(CONCAT(release_seg, '.0.0.0.0.0.0'), '.')) AS seg
-        WITH OFFSET AS off
-        WHERE off < 6
-      ),
-      pre_rank,
-      pre_num,
-      has_post,
-      post_num,
-      not_dev,
-      dev_num
-    ) AS sort_key
-  FROM flagged
+    -- Absent segments read as 0, so 1.2 and 1.2.0 compare equal, as PEP 440 requires.
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(0)] AS INT64), 0) AS rel1,
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(1)] AS INT64), 0) AS rel2,
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(2)] AS INT64), 0) AS rel3,
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(3)] AS INT64), 0) AS rel4,
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(4)] AS INT64), 0) AS rel5,
+    IFNULL(SAFE_CAST(rel[SAFE_OFFSET(5)] AS INT64), 0) AS rel6,
+    IF(pre_rank = 4 AND dev_rank = 1, 1, 0) AS is_final
+  FROM scored
 ),
 -- One row per (project, version): keep the most recently uploaded file's metadata.
 per_version AS (
@@ -2342,7 +2343,14 @@ FROM (
   SELECT
     *,
     ROW_NUMBER() OVER (
-      PARTITION BY canonical_name ORDER BY sort_key DESC, version DESC
+      PARTITION BY canonical_name
+      ORDER BY
+        is_final DESC, epoch DESC,
+        rel1 DESC, rel2 DESC, rel3 DESC, rel4 DESC, rel5 DESC, rel6 DESC,
+        pre_rank DESC, pre_num DESC,
+        post_rank DESC, post_num DESC,
+        dev_rank DESC, dev_num DESC,
+        version DESC
     ) AS wn
   FROM per_version
 )
@@ -2381,6 +2389,46 @@ def test_winners_sql_targets_the_public_table() -> None:
 
 def test_winners_sql_canonicalizes_the_same_way_packaging_does() -> None:
     assert "LOWER(REGEXP_REPLACE(name, r'[-_.]+', '-'))" in bigquery.WINNERS_SQL
+
+
+def test_post_releases_are_not_classified_as_prereleases() -> None:
+    """PEP 440 sorts 1.0.post1 ABOVE 1.0. Lumping `post` in with a/b/rc/dev is the
+    most tempting way to get this wrong, and it makes every post-release lose to
+    its own base version."""
+    pre_rank_block = bigquery.WINNERS_SQL[
+        bigquery.WINNERS_SQL.index("AS pre_rank") - 600 : bigquery.WINNERS_SQL.index(
+            "AS pre_rank"
+        )
+    ]
+    assert "post" not in pre_rank_block
+    assert "AS post_rank" in bigquery.WINNERS_SQL
+    assert "IF(pre_rank = 4 AND dev_rank = 1, 1, 0) AS is_final" in bigquery.WINNERS_SQL
+
+
+def test_is_final_is_the_most_significant_sort_component() -> None:
+    """Warehouse prefers any final release over any prerelease, so a 2.0.0rc1 must
+    lose to a 1.9.9. That only holds if is_final leads the ORDER BY."""
+    order_by = bigquery.WINNERS_SQL[bigquery.WINNERS_SQL.rindex("ORDER BY") :]
+    components = [
+        "is_final",
+        "epoch",
+        "rel1",
+        "pre_rank",
+        "post_rank",
+        "dev_rank",
+    ]
+    positions = [order_by.index(name) for name in components]
+    assert positions == sorted(positions), (
+        f"sort components out of order: {list(zip(components, positions, strict=True))}"
+    )
+
+
+def test_prerelease_stages_are_ordered_not_collapsed() -> None:
+    """1.0b1 must beat 1.0a2, which requires distinct ranks per stage rather than
+    a single is_prerelease flag with a shared numeric tiebreak."""
+    for stage, rank in (("alpha|a", 1), ("beta|b", 2), ("preview|pre|rc|c", 3)):
+        assert f"THEN {rank}" in bigquery.WINNERS_SQL
+        assert stage in bigquery.WINNERS_SQL
 
 
 def test_audit_sql_uses_a_deterministic_sample() -> None:

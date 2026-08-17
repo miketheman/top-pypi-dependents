@@ -41,6 +41,16 @@ class Disagreement:
     packaging_pick: str | None
 
 
+def _picks_agree(actual: str | None, expected: str | None) -> bool:
+    """Compare two version picks, treating PEP 440-equal versions as equal."""
+    if actual is not None and expected is not None:
+        try:
+            return Version(actual) == Version(expected)
+        except InvalidVersion:
+            pass
+    return actual == expected
+
+
 def audit(
     sample: Mapping[str, Sequence[str]],
     sql_picks: Mapping[str, str],
@@ -54,7 +64,7 @@ def audit(
     for project, all_versions in sorted(sample.items()):
         expected = select_latest(all_versions)
         actual = sql_picks.get(project)
-        if actual != expected:
+        if not _picks_agree(actual, expected):
             found.append(
                 Disagreement(project=project, sql_pick=actual, packaging_pick=expected)
             )

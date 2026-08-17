@@ -101,21 +101,32 @@ than all ~8M `(name, version)` pairs. Measured alternatives:
 
 ### The sort key
 
-BigQuery cannot `ORDER BY` an array, so the key is a zero-padded concatenated string.
-It encodes, in order of significance:
+BigQuery cannot `ORDER BY` an array, and a packed zero-padded string key was rejected:
+`LPAD` truncates rather than errors when a segment exceeds its width, silently
+corrupting the key, and a packed key is undebuggable when a pick looks wrong. The key
+is instead a set of typed `INT64` columns compared natively in one `ROW_NUMBER() OVER
+(PARTITION BY canonical_name ORDER BY ...)`, in this order of significance:
 
-1. `is_final` — 1 when the version has no pre-release or dev segment, else 0. Leading
-   with this makes `MAX(key)` prefer any final release over any prerelease, which is
-   the Warehouse behavior. It is *not* sufficient on its own; the remaining components
-   still need full stage ordering to compare two prereleases of the same release.
+1. `is_final` — 1 when the version has neither a pre-release nor a dev segment, else 0.
+   Leading with this makes any final release outrank any prerelease, which is
+   Warehouse's `ORDER BY is_prerelease ASC`. It is *not* sufficient alone; the
+   remaining components still order two prereleases of the same release.
 2. `epoch` — the `N!` prefix, 0 when absent.
-3. `release` — the dotted numeric segments, each `LPAD`-ed to a fixed width and
-   right-padded to a fixed segment count so that `1.2` and `1.2.0` compare equal.
-4. `pre_stage` — `dev` = 0, `a`/`alpha` = 1, `b`/`beta` = 2, `c`/`rc`/`pre`/`preview` = 3,
-   none = 4. PEP 440 orders `dev < a < b < rc < final < post`.
+3. `rel1`..`rel6` — the dotted numeric segments, absent ones reading as 0 so that
+   `1.2` and `1.2.0` compare equal, as PEP 440 requires.
+4. `pre_rank` — `dev`-only = 0, `a`/`alpha` = 1, `b`/`beta` = 2,
+   `c`/`rc`/`pre`/`preview` = 3, none = 4. This mirrors `packaging`'s own `_cmpkey`,
+   where an absent pre segment sorts as −∞ for a dev-only version and +∞ for a final one.
 5. `pre_num` — the numeric suffix of the pre-release segment.
-6. `post_num` — the `.postN` value, 0 when absent.
-7. `dev_num` — a `.devN` appearing after a post segment.
+6. `post_rank`, `post_num` — presence, then value. **A post-release is a final release,
+   not a prerelease**: PEP 440 sorts `1.0.post1` above `1.0`. Classifying `post`
+   alongside `a`/`b`/`rc`/`dev` is the most tempting way to get this wrong, and it would
+   make every post-release lose to its own base version.
+7. `dev_rank`, `dev_num` — absence sorts high (+∞ in `packaging`), so `1.0` beats
+   `1.0.dev1` and `1.0.post1` beats `1.0.post1.dev1`.
+
+Regex alternations are ordered longest-branch-first (`alpha` before `a`, `preview`
+before `pre`) so RE2's leftmost-first matching cannot stop at the short branch.
 
 ### The correctness guard
 

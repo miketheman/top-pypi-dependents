@@ -62,3 +62,16 @@ def test_audit_reports_a_project_sql_omitted() -> None:
     assert audit(sample, {}) == [
         Disagreement(project="alpha", sql_pick=None, packaging_pick="1.0")
     ]
+
+
+def test_audit_treats_pep440_equal_picks_as_agreement() -> None:
+    sample = {"alpha": ["1.2", "1.2.0"]}
+    assert audit(sample, {"alpha": "1.2"}) == []
+    assert audit(sample, {"alpha": "1.2.0"}) == []
+
+
+def test_audit_reports_a_disagreement_when_sql_pick_is_unparseable() -> None:
+    sample = {"a": ["1.0"]}
+    assert audit(sample, {"a": "not-a-version"}) == [
+        Disagreement(project="a", sql_pick="not-a-version", packaging_pick="1.0")
+    ]
