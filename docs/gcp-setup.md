@@ -34,11 +34,27 @@ to run any query, free or not, on a project with no billing account attached.
 
 Note the project id (`<PROJECT_ID>`) — every command below uses it.
 
-## 2. Enable the BigQuery API
+## 2. Enable the BigQuery and IAM Credentials APIs
 
 ```bash
 gcloud services enable bigquery.googleapis.com --project=<PROJECT_ID>
+gcloud services enable iamcredentials.googleapis.com --project=<PROJECT_ID>
 ```
+
+`iamcredentials.googleapis.com` is easy to miss, because nothing needs it until
+a *federated* run happens. Workload identity federation is two hops: the runner
+exchanges its OIDC token at STS, then impersonates the service account — and
+that second hop is the one this API serves. Local `gcloud` credentials skip it
+entirely, so an `extract --dry-run` from a laptop passes while the identical
+command in Actions fails with:
+
+```
+RefreshError: Unable to acquire impersonated credentials
+  ... "reason": "SERVICE_DISABLED", "service": "iamcredentials.googleapis.com"
+```
+
+Read that error as "one API is off", not as a broken provider binding. Reaching
+the impersonation call at all proves the token exchange already succeeded.
 
 ## 3. Create a service account with only `bigquery.jobUser`
 
