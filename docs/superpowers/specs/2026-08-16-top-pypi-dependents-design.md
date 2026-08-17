@@ -280,7 +280,7 @@ are excluded from the ranking, but they are part of the graph.
 ```sql
 snapshots (
   snapshot_id       INTEGER PRIMARY KEY,
-  captured_at       TIMESTAMP,
+  captured_at       TIMESTAMPTZ,
   source            VARCHAR,   -- 'bigquery-public-data.pypi.distribution_metadata'
   project_count     INTEGER,
   edge_count        INTEGER,
@@ -292,7 +292,7 @@ projects (
   canonical_name     VARCHAR,  -- packaging.utils.canonicalize_name
   name               VARCHAR,  -- as declared in metadata
   latest_version     VARCHAR,
-  latest_upload_time TIMESTAMP,
+  latest_upload_time TIMESTAMPTZ,
   summary            VARCHAR,
   requires_python    VARCHAR,
   is_live            BOOLEAN   -- present in pypi.org/simple/
@@ -329,13 +329,13 @@ Four CLI subcommands, each independently runnable and testable:
 
 | command | reads | writes |
 | --- | --- | --- |
-| `extract` | BigQuery, `pypi.org/simple/` | `build/winners.parquet`, `build/audit_sample.parquet`, `build/live_names.txt` |
+| `extract` | BigQuery, `pypi.org/simple/` | `build/winners.jsonl`, `build/audit_sample.jsonl`, `build/live_names.txt` |
 | `build` | those files | `build/dependents.duckdb` |
 | `artifacts` | the DuckDB file, existing `data/latest.json` | `data/latest.json`, `build/edges.parquet` |
 | `render` | `data/latest.json` | `site/` |
 
-`build/winners.parquet` carries one row per project: `name`, `version`, `upload_time`,
-`requires_dist`, `summary`, and `requires_python`. `build/audit_sample.parquet` carries
+`build/winners.jsonl` carries one row per project: `name`, `version`, `upload_time`,
+`requires_dist`, `summary`, and `requires_python`. `build/audit_sample.jsonl` carries
 `(name, version)` only.
 
 `build` is where the audit-sample check runs and where the run fails on disagreement.
@@ -462,7 +462,7 @@ tests/
 ## Credentials
 
 GCP is not set up yet. `sources/base.py` defines a `MetadataSource` protocol;
-`sources/fixture.py` implements it against checked-in Parquet. Everything except the
+`sources/fixture.py` implements it against checked-in JSONL. Everything except the
 live extract is buildable, testable, and reviewable before any GCP work happens.
 `sources/bigquery.py` implements the same protocol and stays unexercised by CI until
 credentials exist.
@@ -481,15 +481,17 @@ client is never invoked accidentally.
   prerelease-only projects, `Django` vs `django`, `zope.interface` vs `zope-interface`,
   extras-gated markers, unparseable requirement strings, and edges pointing at
   nonexistent projects.
-- **Version selection oracle.** Property-based comparison of the selection logic
-  against `packaging.version.parse` over generated version sets.
+- **Version selection oracle.** Hand-written cases against `select_latest` (which
+  wraps `packaging.version.parse`), not a property-based generator: epochs, `.post`,
+  `.dev`, prerelease-only projects, and equivalent zero-padding (`1.2` vs `1.2.0`).
 - **Audit-check behavior.** A test proving the build stage *fails* when the SQL winner
   and the `packaging` winner disagree — the guard itself needs a failing case.
 - **Counting rules.** Runtime versus all-edges counts on the fixture, verified against
   hand-computed expectations.
 - **Rank deltas.** Two successive `artifacts` runs over different snapshots, asserting
   `previous_rank`, `rank_change`, and null handling for newly-appearing projects.
-- **Golden tests.** JSON schema shape and rendered HTML.
+- **Output assertions.** JSON payload shape and rendered HTML content, checked with
+  targeted assertions rather than stored golden files.
 
 ## Out of scope
 
