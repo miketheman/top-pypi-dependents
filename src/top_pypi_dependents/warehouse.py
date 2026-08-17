@@ -93,9 +93,9 @@ def load_snapshot(
     winners = source.winners()
     sql_picks = {w.canonical_name: w.version for w in winners}
     sample = source.audit_sample()
-    disagreements = audit(sample, sql_picks)
-    if disagreements:
-        raise AuditFailedError(disagreements)
+    result = audit(sample, sql_picks)
+    if result.disagreements:
+        raise AuditFailedError(result.disagreements)
 
     for winner in winners:
         expected = canonical(winner.name)

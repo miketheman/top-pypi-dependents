@@ -67,7 +67,7 @@ def _render(args: argparse.Namespace) -> int:
 def _extract(args: argparse.Namespace) -> int:
     # Local import keeps google-cloud-bigquery out of the import path for every
     # other subcommand; CI runs `uv sync` without the `bigquery` group to prove it.
-    from top_pypi_dependents.sources.bigquery import (  # noqa: PLC0415  # ty: ignore[unresolved-import]
+    from top_pypi_dependents.sources.bigquery import (  # noqa: PLC0415
         extract_to_directory,
     )
 
