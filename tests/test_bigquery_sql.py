@@ -1,12 +1,14 @@
 import importlib.resources
+import json
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
 from top_pypi_dependents.sources import bigquery
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -187,37 +189,62 @@ def test_write_audit_sample_groups_by_project(tmp_path: Path) -> None:
 
 
 class _FakeResponse:
-    """Stands in for ``urllib3.BaseHTTPResponse``."""
+    """Stands in for a streamed ``urllib3.BaseHTTPResponse``.
 
-    def __init__(self, status: int, payload: dict[str, Any] | None = None) -> None:
+    ``fetch_live_names`` reads the body through ``stream()``/``release_conn()``
+    rather than ``.json()``, so the fake mirrors that surface instead.
+    """
+
+    def __init__(self, status: int, body: bytes = b"") -> None:
         self.status = status
-        self._payload = payload
+        self._body = body
+        self.released = False
 
-    def json(self) -> dict[str, Any]:
-        assert self._payload is not None
-        return self._payload
+    def stream(self, amt: int) -> Iterator[bytes]:
+        for offset in range(0, len(self._body), amt):
+            yield self._body[offset : offset + amt]
+
+    def release_conn(self) -> None:
+        self.released = True
 
 
 def test_fetch_live_names_writes_names_and_returns_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     urllib3 = pytest.importorskip("urllib3")
-    payload = {"projects": [{"name": "requests"}, {"name": "urllib3"}]}
-    monkeypatch.setattr(
-        urllib3, "request", lambda *_args, **_kwargs: _FakeResponse(200, payload)
-    )
+    payload = json.dumps(
+        {"projects": [{"name": "requests"}, {"name": "urllib3"}]}
+    ).encode("utf-8")
+    fake = _FakeResponse(200, payload)
+    monkeypatch.setattr(urllib3, "request", lambda *_args, **_kwargs: fake)
     count = bigquery.fetch_live_names(tmp_path)
     assert count == 2
     written = (tmp_path / "live_names.txt").read_text(encoding="utf-8")
     assert written == "requests\nurllib3\n"
+    assert fake.released
 
 
 def test_fetch_live_names_raises_on_a_non_2xx_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     urllib3 = pytest.importorskip("urllib3")
-    monkeypatch.setattr(
-        urllib3, "request", lambda *_args, **_kwargs: _FakeResponse(503)
-    )
+    fake = _FakeResponse(503)
+    monkeypatch.setattr(urllib3, "request", lambda *_args, **_kwargs: fake)
     with pytest.raises(RuntimeError, match="503"):
         bigquery.fetch_live_names(tmp_path)
+    assert fake.released
+
+
+def test_fetch_live_names_raises_when_the_body_exceeds_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An oversized body must raise, not silently truncate: a truncated index
+    would set is_live false for most projects and collapse every dependent
+    count -- exactly what the plausibility floors exist to catch."""
+    urllib3 = pytest.importorskip("urllib3")
+    monkeypatch.setattr(bigquery, "MAX_INDEX_BYTES", 10)
+    fake = _FakeResponse(200, b"x" * 11)
+    monkeypatch.setattr(urllib3, "request", lambda *_args, **_kwargs: fake)
+    with pytest.raises(RuntimeError, match="10"):
+        bigquery.fetch_live_names(tmp_path)
+    assert fake.released

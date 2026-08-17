@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 TABLE = "bigquery-public-data.pypi.distribution_metadata"
 SIMPLE_INDEX = "https://pypi.org/simple/"
 SIMPLE_ACCEPT = "application/vnd.pypi.simple.v1+json"
+# The real index measured ~42 MB (872,875 projects) and grows monotonically but
+# slowly. urllib3 v2 auto-negotiates Accept-Encoding and decompresses
+# transparently with no size limit of its own, so a compromised origin or CDN
+# edge could otherwise expand a small compressed body into gigabytes and
+# OOM-kill the runner. 300 MB is ~7x today's size -- years of headroom at the
+# index's actual growth rate -- while still bounding memory well below what a
+# CI runner has to give.
+MAX_INDEX_BYTES = 300 * 1024**2
 
 _SQL = files("top_pypi_dependents") / "sql"
 WINNERS_SQL = (_SQL / "winners.sql").read_text(encoding="utf-8")
@@ -79,11 +87,31 @@ def fetch_live_names(out_dir: Path) -> int:
         headers={"Accept": SIMPLE_ACCEPT},
         timeout=urllib3.Timeout(connect=10.0, read=120.0),
         retries=retries,
+        preload_content=False,
     )
-    if response.status != http.HTTPStatus.OK:
-        msg = f"GET {SIMPLE_INDEX} returned HTTP {response.status}"
-        raise RuntimeError(msg)
-    names = [entry["name"] for entry in response.json()["projects"]]
+    try:
+        if response.status != http.HTTPStatus.OK:
+            msg = f"GET {SIMPLE_INDEX} returned HTTP {response.status}"
+            raise RuntimeError(msg)
+        # Stream and cap the (decompressed) body instead of reading it whole,
+        # so a hostile or compromised response can't inflate past MAX_INDEX_BYTES
+        # and exhaust the runner's memory. See MAX_INDEX_BYTES for the cap.
+        chunks = []
+        total = 0
+        for chunk in response.stream(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_INDEX_BYTES:
+                msg = (
+                    f"GET {SIMPLE_INDEX} exceeded the {MAX_INDEX_BYTES:,} byte cap "
+                    f"on the simple index (at least {total:,} bytes observed); "
+                    f"refusing to keep reading"
+                )
+                raise RuntimeError(msg)
+            chunks.append(chunk)
+    finally:
+        response.release_conn()
+    body = b"".join(chunks)
+    names = [entry["name"] for entry in json.loads(body)["projects"]]
     (out_dir / "live_names.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
     return len(names)
 
