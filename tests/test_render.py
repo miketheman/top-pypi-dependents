@@ -17,7 +17,7 @@ def payload() -> dict:
         con,
         source=FixtureSource(FIXTURES),
         captured_at=datetime(2026, 9, 1, tzinfo=UTC),
-    )
+    ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return artifacts.build_payload(
         con,

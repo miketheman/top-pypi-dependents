@@ -21,7 +21,7 @@ def con_and_snapshot() -> ConAndSnapshot:
         con,
         source=FixtureSource(FIXTURES),
         captured_at=datetime(2026, 9, 1, tzinfo=UTC),
-    )
+    ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return con, snapshot_id
 

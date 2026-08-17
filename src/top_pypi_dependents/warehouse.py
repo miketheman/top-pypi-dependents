@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import duckdb
@@ -73,6 +74,17 @@ class AuditFailedError(Exception):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SnapshotLoad:
+    """The outcome of loading one snapshot."""
+
+    snapshot_id: int
+    audit_skipped: int
+    """``AuditResult.skipped`` from the version-selection audit: projects in
+    the audit sample where ``packaging`` could not parse any version, so the
+    SQL's pick had no oracle to be checked against."""
+
+
 def connect(path: Path | None) -> duckdb.DuckDBPyConnection:
     """Open a DuckDB connection; ``None`` opens an in-memory database."""
     return duckdb.connect(":memory:" if path is None else str(path))
@@ -88,7 +100,7 @@ def load_snapshot(
     *,
     source: MetadataSource,
     captured_at: datetime,
-) -> int:
+) -> SnapshotLoad:
     """Load one snapshot. Raises ``AuditFailedError`` before writing anything."""
     winners = source.winners()
     sql_picks = {w.canonical_name: w.version for w in winners}
@@ -172,7 +184,7 @@ def load_snapshot(
         con.rollback()
         raise
     con.commit()
-    return snapshot_id
+    return SnapshotLoad(snapshot_id=snapshot_id, audit_skipped=result.skipped)
 
 
 RANKINGS_SQL = """

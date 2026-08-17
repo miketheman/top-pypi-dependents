@@ -1,0 +1,150 @@
+name: Refresh
+
+on:
+  schedule:
+    - cron: "17 4 2 * *"  # 04:17 UTC on the 2nd of each month
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report bytes to be scanned and stop"
+        type: boolean
+        default: false
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  refresh:
+    name: Extract, build, publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      pages: write
+    outputs:
+      tag: ${{ steps.stamp.outputs.tag }}
+    steps:
+      # On the `schedule` trigger there is no `workflow_dispatch` input, so
+      # `inputs.dry_run` is `null`, not `false`. Every `if:` below compares
+      # against `true` explicitly rather than relying on truthiness, so a
+      # scheduled run reliably takes the real (non-dry-run) path instead of
+      # silently no-op'ing.
+      #
+      # This checkout deliberately does not set `persist-credentials: false`,
+      # because the "Commit the ranked JSON" step below pushes with the
+      # checked-out credentials.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 # zizmor: ignore[artipacked] this job pushes a commit and needs the persisted credentials
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Sync with the bigquery group
+        run: uv sync --group bigquery
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Dry run
+        if: inputs.dry_run == true
+        run: uv run top-pypi-dependents extract --dry-run --project "${GCP_PROJECT_ID}"
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Extract
+        if: inputs.dry_run != true
+        run: uv run top-pypi-dependents extract --output build --project "${GCP_PROJECT_ID}"
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Build
+        if: inputs.dry_run != true
+        run: uv run top-pypi-dependents build --input build --database build/dependents.duckdb
+
+      - name: Stamp the release tag
+        id: stamp
+        if: inputs.dry_run != true
+        run: |
+          month="$(date -u +%Y-%m)"
+          echo "month=${month}" >> "${GITHUB_OUTPUT}"
+          echo "tag=data-${month}" >> "${GITHUB_OUTPUT}"
+
+      - name: Artifacts
+        if: inputs.dry_run != true
+        env:
+          MONTH: ${{ steps.stamp.outputs.month }}
+        run: |
+          uv run top-pypi-dependents artifacts \
+            --database build/dependents.duckdb \
+            --output data/latest.json \
+            --edges "build/edges-${MONTH}.parquet"
+          mv build/dependents.duckdb "build/dependents-${MONTH}.duckdb"
+
+      - name: Render
+        if: inputs.dry_run != true
+        run: uv run top-pypi-dependents render --payload data/latest.json --output site
+
+      - name: Commit the ranked JSON
+        if: inputs.dry_run != true
+        env:
+          MONTH: ${{ steps.stamp.outputs.month }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/latest.json; then
+            echo "No ranking change; nothing to commit."
+          else
+            git add data/latest.json
+            git commit -m "Refresh rankings for ${MONTH}"
+            git push
+          fi
+
+      - name: Publish release assets
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.stamp.outputs.tag }}
+          MONTH: ${{ steps.stamp.outputs.month }}
+        run: |
+          # Idempotent: a retry after a transient failure downstream (e.g. the
+          # Pages upload) re-runs this step against the same month. Create the
+          # release only if it doesn't already exist, then upload with
+          # --clobber so re-uploading the same assets converges instead of
+          # failing the job.
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" --title "${TAG}" --notes "Monthly dependency graph snapshot."
+          fi
+          gh release upload "${TAG}" --clobber \
+            "build/dependents-${MONTH}.duckdb" \
+            "build/edges-${MONTH}.parquet"
+
+      - name: Upload the Pages artifact
+        if: inputs.dry_run != true
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: refresh
+    if: inputs.dry_run != true
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

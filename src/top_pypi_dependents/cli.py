@@ -22,13 +22,29 @@ DEFAULT_LIMIT = 100_000
 def _build(args: argparse.Namespace) -> int:
     con = warehouse.connect(Path(args.database))
     warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
+    load_result = warehouse.load_snapshot(
         con,
         source=FixtureSource(Path(args.input)),
         captured_at=datetime.now(tz=UTC),
     )
+    snapshot_id = load_result.snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
+    row = con.execute(
+        "SELECT project_count, edge_count, unparsed_count FROM snapshots "
+        "WHERE snapshot_id = ?",
+        [snapshot_id],
+    ).fetchone()
     con.close()
+    if row is None:
+        msg = f"snapshot {snapshot_id} vanished immediately after being written"
+        raise SystemExit(msg)
+    project_count, edge_count, unparsed_count = row
+    print(  # noqa: T201
+        f"snapshot {snapshot_id}: {project_count} projects, {edge_count} edges, "
+        f"{unparsed_count} unparsed requirements, "
+        f"{load_result.audit_skipped} audit-skipped (unparseable in every "
+        f"sampled version)"
+    )
     return 0
 
 

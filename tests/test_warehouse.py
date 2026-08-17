@@ -36,7 +36,7 @@ def con_and_snapshot() -> ConAndSnapshot:
     warehouse.create_schema(con)
     snapshot_id = warehouse.load_snapshot(
         con, source=FixtureSource(FIXTURES), captured_at=CAPTURED
-    )
+    ).snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
     return con, snapshot_id
 
@@ -259,12 +259,12 @@ def test_snapshot_with_no_parseable_edges_skips_the_dependencies_insert() -> Non
 
     con = warehouse.connect(None)
     warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
+    load_result = warehouse.load_snapshot(
         con, source=NoEdgesSource(FIXTURES), captured_at=CAPTURED
     )
     assert _row_count(con, "projects") == 1
     assert _row_count(con, "dependencies") == 0
-    assert snapshot_id == 1
+    assert load_result.snapshot_id == 1
 
 
 class _FailAfterFirstExecuteMany:
@@ -311,7 +311,7 @@ def test_load_snapshot_rolls_back_a_mid_load_failure() -> None:
     # A retry starts clean instead of merging into an orphaned snapshot_id.
     snapshot_id = warehouse.load_snapshot(
         con, source=FixtureSource(FIXTURES), captured_at=CAPTURED
-    )
+    ).snapshot_id
     assert snapshot_id == 1
     requests_rows = con.execute(
         "SELECT count(*) FROM projects "
