@@ -18,47 +18,57 @@ counts as a dependent, which alternatives were rejected — lives in
 `docs/superpowers/specs/2026-08-16-top-pypi-dependents-design.md`. Read it before
 changing how anything is counted.
 
-## Status: dry-run verified, never run for real
+## Status: live
 
-GCP project `top-pypi-dependents` is wired up, and `extract --dry-run` has
-reached the live table both locally and from Actions. No query has ever been
-billed, no data has been written, and `data/latest.json` still does not exist.
-The build, artifacts and render stages are still only exercised against the
-checked-in JSONL fixture in `tests/fixtures/`.
+The whole pipeline ran end to end against live BigQuery on 2026-08-17 and
+published everything it is meant to publish. The monthly cron (`17 4 2 * *`)
+now runs unattended.
 
-What the dry runs proved, on 2026-08-17:
+First real run, snapshot 1:
 
-- `_validate_schema` passes against the real table, so
-  `bigquery-public-data.pypi.distribution_metadata.requires_dist` really is
-  `ARRAY<STRING>` rather than merely assumed to be.
-- Both queries compile server-side.
-- One run scans ~8.33 GiB (winners 7.80, audit 0.53). That is ~16% of the
-  50 GiB `MAX_BYTES_BILLED` cap, and inside BigQuery's 1 TiB/month free tier,
-  so a monthly job costs effectively nothing. Re-check the headroom as the
-  upstream table grows.
+```
+1,003,087 projects, 3,721,326 edges, 374 unparsed requirements, 3 audit-skipped
+```
 
-- Workload identity federation works end to end from Actions: OIDC mint, STS
-  exchange, service account impersonation, BigQuery job. The federated run
-  reported byte counts identical to the local one.
+What that settled, none of which a fixture or a dry run could:
 
-Remaining to go live, in order:
+- **The audit oracle did not fire.** Version selection pushed into BigQuery SQL
+  agrees with `packaging` on the 1% resample.
+- **The floors are calibrated.** 1,003,087 winners against a `MIN_WINNERS` of
+  500,000 — about 2× headroom, tight enough to mean something and loose enough
+  not to false-alarm.
+- **`fetch_live_names` survives the real `/simple/` endpoint**, well under its
+  300 MB cap.
+- Parsing is clean: 374 unparsed out of 3.72M edges, 0.01%.
+- A run scans ~8.33 GiB (winners 7.80, audit 0.53) — ~16% of the 50 GiB
+  `MAX_BYTES_BILLED` cap and inside BigQuery's 1 TiB/month free tier, so the
+  monthly job costs effectively nothing. Re-check as the upstream table grows.
+- Workload identity federation works from Actions: OIDC mint, STS exchange,
+  service account impersonation, BigQuery job.
 
-1. ~~Repository *variables* (not secrets — none is a credential)
-   `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`.~~
-   Done 2026-08-17, per `docs/gcp-setup.md`.
-2. ~~`workflow_dispatch` with `dry_run: true`.~~ Done 2026-08-17. First attempt
-   failed on `iamcredentials.googleapis.com` being disabled — impersonation is
-   a second hop that local `gcloud` credentials never take, so a laptop dry run
-   cannot catch it. `docs/gcp-setup.md` step 2 now enables that API.
-3. First real run, watched. Three things only a real run can prove: whether the
-   audit oracle fires, whether the plausibility floors are calibrated, and
-   whether `fetch_live_names` survives the real `/simple/` endpoint — a dry run
-   never calls it.
-4. Seed `data/latest.json` once, so month two has something to compute rank
-   movement against.
-5. Enable GitHub Pages — the deploy job assumes a `github-pages` environment.
-   Pages on a private repo needs a paid plan; this one is private and
-   personally owned, so this step may force a plan or visibility decision.
+Published by that run: commit `8eba00e` (`data/latest.json`), release
+`data-2026-08` (DuckDB 208 MB, Parquet 36.5 MB), and the site at
+<https://miketheman.github.io/top-pypi-dependents/>.
+
+Repository state: private, personally owned. Pages is enabled with
+`build_type: workflow`, and the **site is public even though the repo is not** —
+that is deliberate. Code scanning is unavailable on a private personal repo, so
+`zizmor.yml` reports findings as annotations rather than SARIF; if this repo
+ever goes public, switch `advanced-security` back to `true`.
+
+Two things still unexercised:
+
+1. **Rank movement.** `_deltas_baseline` has never had a prior month to compare
+   against. Month two is its first real test, and it is also the first run that
+   can trip `_check_top_row_has_not_collapsed`.
+2. **A second snapshot in the same database.** Every run so far wrote snapshot
+   1 into an empty file.
+
+Known wart: `_build` always constructs a `FixtureSource`, because `extract`
+writes the JSONL that `build` reads — the class name describes the format, not
+the provenance. The consequence is that the published payload reports
+`"source": "fixture"` for data that came from BigQuery. Harmless internally,
+misleading in a public artifact.
 
 ## Traps that have already cost time
 
