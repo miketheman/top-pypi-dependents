@@ -50,6 +50,15 @@ python-version = "3.14"
 [tool.ty.terminal]
 error-on-warning = true
 
+[tool.ty.rules]
+# google-cloud-bigquery and urllib3 live in the `bigquery` dependency group, so
+# `sources/bigquery.py` carries `# ty: ignore[unresolved-import]` on its two lazy
+# imports. Those suppressions are necessary on a default `uv sync` and redundant
+# once the group is installed -- so "unused" is not a stable property here, and
+# leaving this at error made `make lint` pass or fail depending on which optional
+# group happened to be synced.
+unused-ignore-comment = "ignore"
+
 [tool.pytest]
 addopts = ["--disable-socket"]
 

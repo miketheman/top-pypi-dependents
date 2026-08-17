@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC
 from typing import TYPE_CHECKING, Any
+
+from top_pypi_dependents import warehouse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,15 +48,10 @@ def build_payload(
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Assemble the JSON payload, including rank movement against ``previous``."""
-    header = con.execute(
-        "SELECT captured_at, source, project_count, edge_count "
-        "FROM snapshots WHERE snapshot_id = ?",
-        [snapshot_id],
-    ).fetchone()
-    if header is None:
+    snapshot = warehouse.snapshot(con, snapshot_id)
+    if snapshot is None:
         msg = f"no snapshot with id {snapshot_id}"
         raise ValueError(msg)
-    captured_at, source, project_count, edge_count = header
 
     prior_ranks: dict[str, int] = {}
     if previous is not None:
@@ -81,10 +77,8 @@ def build_payload(
 
     return {
         "schema_version": SCHEMA_VERSION,
-        # DuckDB localizes TIMESTAMPTZ to the session timezone on fetch; the
-        # instant is preserved but isoformat() would otherwise emit local time.
-        "generated_at": captured_at.astimezone(UTC).isoformat(),
-        "source": source,
+        "generated_at": snapshot.captured_at.isoformat(),
+        "source": snapshot.source,
         "counting": {
             "basis": "latest non-prerelease release",
             "ranked_on": "runtime",
@@ -92,8 +86,8 @@ def build_payload(
         "previous_generated_at": (
             None if previous is None else previous.get("generated_at")
         ),
-        "project_count": int(project_count),
-        "edge_count": int(edge_count),
+        "project_count": snapshot.project_count,
+        "edge_count": snapshot.edge_count,
         "rows": rows,
     }
 

@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
-    import duckdb
-
 DEFAULT_LIMIT = 100_000
 # The top-ranked project's dependent count moves by a percent or two a month.
 # Halving means the graph collapsed -- most commonly because /simple/ came back
@@ -40,41 +38,19 @@ def _build(args: argparse.Namespace) -> int:
     )
     snapshot_id = load_result.snapshot_id
     warehouse.compute_rankings(con, snapshot_id)
-    row = con.execute(
-        "SELECT project_count, edge_count, unparsed_count FROM snapshots "
-        "WHERE snapshot_id = ?",
-        [snapshot_id],
-    ).fetchone()
+    snapshot = warehouse.snapshot(con, snapshot_id)
     con.close()
-    if row is None:
+    if snapshot is None:
         msg = f"snapshot {snapshot_id} vanished immediately after being written"
         raise SystemExit(msg)
-    project_count, edge_count, unparsed_count = row
     print(  # noqa: T201
-        f"snapshot {snapshot_id}: {project_count} projects, {edge_count} edges, "
-        f"{unparsed_count} unparsed requirements, "
+        f"snapshot {snapshot_id}: {snapshot.project_count} projects, "
+        f"{snapshot.edge_count} edges, "
+        f"{snapshot.unparsed_count} unparsed requirements, "
         f"{load_result.audit_skipped} audit-skipped (unparseable in every "
         f"sampled version)"
     )
     return 0
-
-
-def _latest_snapshot(con: duckdb.DuckDBPyConnection) -> int:
-    row = con.execute("SELECT max(snapshot_id) FROM snapshots").fetchone()
-    if row is None or row[0] is None:
-        msg = "database contains no snapshots; run `build` first"
-        raise SystemExit(msg)
-    return int(row[0])
-
-
-def _captured_at(con: duckdb.DuckDBPyConnection, snapshot_id: int) -> datetime:
-    row = con.execute(
-        "SELECT captured_at FROM snapshots WHERE snapshot_id = ?", [snapshot_id]
-    ).fetchone()
-    if row is None:
-        msg = f"snapshot {snapshot_id} has no row in `snapshots`"
-        raise SystemExit(msg)
-    return row[0].astimezone(UTC)
 
 
 def _deltas_baseline(
@@ -126,21 +102,24 @@ def _check_top_row_has_not_collapsed(
 
 def _artifacts(args: argparse.Namespace) -> int:
     con = warehouse.connect(Path(args.database))
-    snapshot_id = _latest_snapshot(con)
+    snapshot = warehouse.latest_snapshot(con)
+    if snapshot is None:
+        msg = "database contains no snapshots; run `build` first"
+        raise SystemExit(msg)
     out = Path(args.output)
     previous = artifacts.read_payload(out)
     payload = artifacts.build_payload(
         con,
-        snapshot_id,
+        snapshot.snapshot_id,
         limit=args.limit,
-        previous=_deltas_baseline(previous, _captured_at(con, snapshot_id)),
+        previous=_deltas_baseline(previous, snapshot.captured_at),
     )
     # Checked against the payload on disk even when it is this month's own, so a
     # retry still notices a collapse between the two runs.
     _check_top_row_has_not_collapsed(payload, previous)
     artifacts.write_json(payload, out)
     if args.edges:
-        artifacts.export_edges(con, snapshot_id, Path(args.edges))
+        artifacts.export_edges(con, snapshot.snapshot_id, Path(args.edges))
     con.close()
     return 0
 
@@ -193,14 +172,14 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument(
         "--min-projects",
         type=int,
-        default=warehouse.MIN_WINNERS,
+        default=warehouse.DEFAULT_FLOORS.winners,
         help="fail if the source reports fewer projects, or fewer live names, "
         "than this; lower it to build from the test fixtures",
     )
     build.add_argument(
         "--min-audit-sample",
         type=int,
-        default=warehouse.MIN_AUDIT_SAMPLE,
+        default=warehouse.DEFAULT_FLOORS.audit_sample,
         help="fail if the version-selection audit covers fewer projects than this",
     )
     build.set_defaults(func=_build)

@@ -49,4 +49,5 @@ jobs:
       - name: Test with the bigquery group
         run: |
           uv sync --group bigquery
+          uv run ty check src tests
           uv run pytest -q

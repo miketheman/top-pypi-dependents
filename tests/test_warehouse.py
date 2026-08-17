@@ -467,6 +467,18 @@ def test_null_upload_time_survives_as_null(con_and_snapshot: ConAndSnapshot) -> 
     assert row[0] is None
 
 
+def test_reading_a_snapshot_that_is_not_there_returns_none(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    con, snapshot_id = con_and_snapshot
+    assert warehouse.snapshot(con, snapshot_id) is not None
+    assert warehouse.snapshot(con, snapshot_id + 1) is None
+
+
+def test_latest_snapshot_is_none_before_the_first_load() -> None:
+    assert warehouse.latest_snapshot(_empty_warehouse()) is None
+
+
 def test_compute_rankings_is_idempotent(con_and_snapshot: ConAndSnapshot) -> None:
     con, snapshot_id = con_and_snapshot
     before = con.execute(

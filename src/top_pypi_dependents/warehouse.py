@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 import duckdb
@@ -62,26 +63,6 @@ CREATE TABLE IF NOT EXISTS rankings (
 """
 
 
-# PyPI's /simple/ index listed 872,447 live projects on 2026-08-16, and the
-# winners query returns one row per project that has ever published a release --
-# a superset of that. A run that sees fewer than half a million projects has hit
-# something degraded (a renamed dataset, a revoked permission, a truncated
-# /simple/ response) rather than a shrinking Python ecosystem, and publishing its
-# answer would overwrite a good ranking with a collapsed one.
-MIN_WINNERS = 500_000
-MIN_LIVE_NAMES = 500_000
-# audit_sample.sql takes a deterministic 1% of projects, ~8,000 of them. The
-# audit is the only run-time evidence that the SQL sort key picks the same
-# release `packaging` would, so an empty or tiny sample means the guard passed
-# without proving anything.
-MIN_AUDIT_SAMPLE = 1_000
-# Sampled projects whose every version is unparseable by `packaging` have no
-# oracle pick and are skipped, proving nothing. Today's corpus skips a fraction
-# of a percent; at more than a quarter, the audit has stopped covering enough of
-# the sample to count as evidence.
-MAX_AUDIT_SKIP_FRACTION = 0.25
-
-
 class ImplausibleRunError(Exception):
     """An input's magnitude is too far from what a healthy run produces."""
 
@@ -90,10 +71,25 @@ class ImplausibleRunError(Exception):
 class Floors:
     """The minimum plausible magnitude of each of a snapshot's inputs."""
 
-    winners: int = MIN_WINNERS
-    live_names: int = MIN_LIVE_NAMES
-    audit_sample: int = MIN_AUDIT_SAMPLE
-    max_audit_skip_fraction: float = MAX_AUDIT_SKIP_FRACTION
+    # PyPI's /simple/ index listed 872,447 live projects on 2026-08-16, and the
+    # winners query returns one row per project that has ever published a
+    # release -- a superset of that. A run that sees fewer than half a million
+    # projects has hit something degraded (a renamed dataset, a revoked
+    # permission, a truncated /simple/ response) rather than a shrinking Python
+    # ecosystem, and publishing its answer would overwrite a good ranking with a
+    # collapsed one.
+    winners: int = 500_000
+    live_names: int = 500_000
+    # audit_sample.sql takes a deterministic 1% of projects, ~8,000 of them. The
+    # audit is the only run-time evidence that the SQL sort key picks the same
+    # release `packaging` would, so an empty or tiny sample means the guard
+    # passed without proving anything.
+    audit_sample: int = 1_000
+    # Sampled projects whose every version is unparseable by `packaging` have no
+    # oracle pick and are skipped, proving nothing. Today's corpus skips a
+    # fraction of a percent; at more than a quarter, the audit has stopped
+    # covering enough of the sample to count as evidence.
+    max_audit_skip_fraction: float = 0.25
 
 
 DEFAULT_FLOORS = Floors()
@@ -163,6 +159,47 @@ def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(SCHEMA)
 
 
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    """One row of the ``snapshots`` table."""
+
+    snapshot_id: int
+    captured_at: datetime
+    source: str
+    project_count: int
+    edge_count: int
+    unparsed_count: int
+
+
+def snapshot(con: duckdb.DuckDBPyConnection, snapshot_id: int) -> Snapshot | None:
+    """Read one snapshot's header, or ``None`` if no snapshot carries that id."""
+    row = con.execute(
+        "SELECT captured_at, source, project_count, edge_count, unparsed_count "
+        "FROM snapshots WHERE snapshot_id = ?",
+        [snapshot_id],
+    ).fetchone()
+    if row is None:
+        return None
+    return Snapshot(
+        snapshot_id=snapshot_id,
+        # DuckDB localizes TIMESTAMPTZ to the session timezone on fetch; the
+        # instant is preserved but isoformat() would otherwise emit local time.
+        captured_at=row[0].astimezone(UTC),
+        source=row[1],
+        project_count=int(row[2]),
+        edge_count=int(row[3]),
+        unparsed_count=int(row[4]),
+    )
+
+
+def latest_snapshot(con: duckdb.DuckDBPyConnection) -> Snapshot | None:
+    """Read the most recently loaded snapshot, or ``None`` if there is none."""
+    row = con.execute("SELECT max(snapshot_id) FROM snapshots").fetchone()
+    if row is None or row[0] is None:
+        return None
+    return snapshot(con, int(row[0]))
+
+
 def _insert_arrow(
     con: duckdb.DuckDBPyConnection,
     table: str,
@@ -184,7 +221,8 @@ def _insert_arrow(
     view = f"incoming_{table}"
     con.register(view, data)
     try:
-        # Both names are module-level constants, never caller input.
+        # `table` is a literal from this module's own call sites and `view` is
+        # derived from it, so neither name can carry caller input.
         con.execute(f"INSERT INTO {table} SELECT * FROM {view}")  # noqa: S608
     finally:
         con.unregister(view)
