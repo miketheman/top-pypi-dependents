@@ -18,23 +18,46 @@ counts as a dependent, which alternatives were rejected — lives in
 `docs/superpowers/specs/2026-08-16-top-pypi-dependents-design.md`. Read it before
 changing how anything is counted.
 
-## Status: this has never run against live BigQuery
+## Status: dry-run verified, never run for real
 
-No GCP project is wired up. Everything is exercised against the checked-in JSONL
-fixture in `tests/fixtures/`. `data/latest.json` does not exist yet.
+GCP project `top-pypi-dependents` is wired up, and a local `extract --dry-run`
+has reached the live table. No query has ever been billed, no data has been
+written, and `data/latest.json` still does not exist. The build, artifacts and
+render stages are still only exercised against the checked-in JSONL fixture in
+`tests/fixtures/`.
+
+What the local dry run proved, on 2026-08-17:
+
+- `_validate_schema` passes against the real table, so
+  `bigquery-public-data.pypi.distribution_metadata.requires_dist` really is
+  `ARRAY<STRING>` rather than merely assumed to be.
+- Both queries compile server-side.
+- One run scans ~8.33 GiB (winners 7.80, audit 0.53). That is ~16% of the
+  50 GiB `MAX_BYTES_BILLED` cap, and inside BigQuery's 1 TiB/month free tier,
+  so a monthly job costs effectively nothing. Re-check the headroom as the
+  upstream table grows.
+
+It proved nothing about the CI path: it used local end-user ADC, not the
+workload identity federation the workflow authenticates with.
 
 Remaining to go live, in order:
 
-1. Follow `docs/gcp-setup.md`, then set the repository *variables* (not secrets —
-   none is a credential) `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`,
-   `GCP_PROJECT_ID`.
-2. `workflow_dispatch` with `dry_run: true`. Confirms auth and schema without a
-   billable query.
-3. First real run, watched. Two things only a live run can prove: whether the
-   audit oracle fires, and whether the plausibility floors are calibrated.
+1. ~~Repository *variables* (not secrets — none is a credential)
+   `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`.~~
+   Done 2026-08-17, per `docs/gcp-setup.md`.
+2. `workflow_dispatch` with `dry_run: true`. The local dry run does not cover
+   this: what is still unproven is workload identity federation, i.e. whether
+   the provider, service account and repo binding actually let the runner mint
+   a token.
+3. First real run, watched. Three things only a real run can prove: whether the
+   audit oracle fires, whether the plausibility floors are calibrated, and
+   whether `fetch_live_names` survives the real `/simple/` endpoint — a dry run
+   never calls it.
 4. Seed `data/latest.json` once, so month two has something to compute rank
    movement against.
 5. Enable GitHub Pages — the deploy job assumes a `github-pages` environment.
+   Pages on a private repo needs a paid plan; this one is private and
+   personally owned, so this step may force a plan or visibility decision.
 
 ## Traps that have already cost time
 
