@@ -14,8 +14,11 @@ runtime dependency on them, read from each project's latest release.</p>
   <path d="M74 8h46" stroke-width="1"/>
 </svg>
 
-<p class="hint" id="filter-hint">Searches all {{ "{:,}".format(row_count) }} ranked
-  projects, not just the {{ "{:,}".format(rows | length) }} listed here.</p>
+{# The counts live one element down, in the line that reports them as state.
+  What this has to say is the part a reader cannot infer: the filter reaches
+  past the page. #}
+<p class="hint" id="filter-hint">Searches every ranked project, not just the ones
+  listed here.</p>
 {# The field and the count travel together, and on a phone they stay put: with a
   keyboard open the viewport halves, and results that render below a screenful of
   masthead are results nobody can read while typing. #}

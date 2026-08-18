@@ -215,7 +215,7 @@ def test_the_filter_says_what_it_searches(tmp_path: Path, payload: dict) -> None
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert 'aria-describedby="filter-hint"' in html
     assert 'id="filter-hint"' in html
-    assert "Searches all 3 ranked" in html
+    assert "Searches every ranked project" in html
 
 
 def test_a_polite_status_region_reports_the_count(
@@ -428,3 +428,15 @@ def test_the_page_lists_its_rows_without_a_reveal_control(
     ]
     assert len(rows) == 2
     assert not any(row.endswith(" hidden>") for row in rows)
+
+
+def test_the_hint_and_the_count_do_not_repeat_each_other(
+    tmp_path: Path, payload: dict
+) -> None:
+    """Two elements, two jobs: the hint claims reach, the count reports state."""
+    render.render_site(payload, tmp_path, rows=2)
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    hint = next(line for line in html.splitlines() if 'id="filter-hint"' in line)
+    assert "3" not in hint  # the ranked total belongs to the count line alone
+    assert 'Showing <span id="shown">2</span>' in html
+
