@@ -9,8 +9,10 @@ Rank PyPI projects by how many other projects depend on them, refresh the rankin
 monthly, and publish three artifacts:
 
 1. A downloadable JSON list of the top 100,000 projects by dependent count.
-2. A browsable static HTML site on GitHub Pages showing the top 100 / 1,000 / 10,000,
-   with month-over-month rank movement.
+2. A browsable static HTML site on GitHub Pages, with month-over-month rank movement.
+   One rankings page carries the largest tier and reveals it in steps — 100, then
+   1,000, then 10,000 — rather than one page per tier. Rows past the first step are
+   `hidden` in the markup, so the browser never lays out the ones nobody asked for.
 3. A DuckDB database and Parquet edge export carrying the full dependency graph,
    attached to a dated GitHub Release.
 
@@ -449,6 +451,7 @@ pyproject.toml
   dependabot.yml
   workflows/ci.yml                 # ruff, ty, pytest + coverage
   workflows/refresh.yml            # monthly cron
+  workflows/site.yml               # republish the site, no BigQuery
   workflows/zizmor.yml
 data/
   latest.json
@@ -467,6 +470,7 @@ src/top_pypi_dependents/
   versions.py                      # PEP 440 selection + audit comparison
   warehouse.py                     # DuckDB schema, load, ranking SQL
   artifacts.py                     # JSON emitters, rank deltas
+  log.py                           # stage timing and outcomes
   render.py                        # Jinja2 → site/
   sql/                             # winners.sql, audit_sample.sql
   templates/                       # base/index/table .html.j2

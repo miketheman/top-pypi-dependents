@@ -142,6 +142,30 @@
   input[type="search"]::placeholder { color: var(--ink-subtle); }
   input[type="search"]:hover { border-color: var(--ink-muted); }
 
+  .steps {
+    margin: 0 0 1.5rem;
+    color: var(--ink-muted);
+    font-size: clamp(0.875rem, 0.85rem + 0.10vw, 0.9375rem);
+  }
+
+  .steps button {
+    margin-left: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    font: inherit;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: border-color var(--dur) var(--ease),
+                background var(--dur) var(--ease);
+  }
+
+  .steps button:hover {
+    border-color: var(--ink-muted);
+    background: var(--surface-hover);
+  }
+
   table { border-collapse: collapse; width: 100%; }
 
   thead th {
@@ -207,7 +231,7 @@
 <body>
 <nav>
   <a href="index.html">About</a>
-  {% for tier in tiers %}<a href="top-{{ tier }}.html">Top {{ "{:,}".format(tier) }}</a>{% endfor %}
+  <a href="rankings.html">Rankings</a>
 </nav>
 {% block content %}{% endblock %}
 <footer>

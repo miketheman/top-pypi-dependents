@@ -1,7 +1,7 @@
 {% extends "base.html.j2" %}
-{% block title %}Top {{ "{:,}".format(tier) }} PyPI Dependents{% endblock %}
+{% block title %}PyPI Dependents Rankings{% endblock %}
 {% block content %}
-<h1>Top {{ "{:,}".format(tier) }}</h1>
+<h1>Rankings</h1>
 <p class="lede">PyPI projects ranked by how many other projects declare an unconditional
 runtime dependency on them, read from each project's latest release.</p>
 
@@ -16,6 +16,17 @@ runtime dependency on them, read from each project's latest release.</p>
 <label class="label" for="filter">Filter</label>
 <input id="filter" type="search" placeholder="Project name" autocomplete="off">
 
+<p class="steps">Showing <span id="shown">{{ "{:,}".format(initial) }}</span> of
+  {{ "{:,}".format(rows | length) }}.
+  {% for step in steps[1:] %}
+  <button type="button" data-limit="{{ step }}">Show {{ "{:,}".format(step) }}</button>
+  {% endfor %}
+</p>
+
+<p class="steps" id="empty" hidden>No match in the top
+  {{ "{:,}".format(rows | length) }}. All {{ "{:,}".format(row_count) }} ranked projects
+  are in <a href="latest.json">latest.json</a>.</p>
+
 <table id="rows">
   <thead>
     <tr>
@@ -28,7 +39,7 @@ runtime dependency on them, read from each project's latest release.</p>
   </thead>
   <tbody>
   {% for row in rows %}
-    <tr data-name="{{ row.project }}">
+    <tr data-name="{{ row.project }}"{% if loop.index > initial %} hidden{% endif %}>
       <td class="num rank">{{ row.rank }}</td>
       <td><a href="https://pypi.org/project/{{ row.project }}/">{{ row.project }}</a></td>
       <td class="num">{{ "{:,}".format(row.dependents) }}</td>
@@ -54,11 +65,41 @@ runtime dependency on them, read from each project's latest release.</p>
 // this loop -- rewriting it to toggle a single stylesheet rule instead was
 // measured and made no reliable difference. If the latency ever matters,
 // the answer is fewer rows on the page, not a cleverer filter.
-document.getElementById("filter").addEventListener("input", (event) => {
-  const needle = event.target.value.trim().toLowerCase();
-  for (const row of document.querySelectorAll("#rows tbody tr")) {
-    row.hidden = !row.dataset.name.includes(needle);
+//
+// Filtering and the reveal limit share one pass, because they are the same
+// decision: a row is visible if it matches and is within the limit. Two
+// independent handlers each setting `hidden` would fight over every row.
+//
+// A search looks past the limit deliberately. Someone typing a name wants that
+// project found whether or not it sits in the first hundred, and a search that
+// silently only covered the visible rows would be worse than none.
+const rows = Array.from(document.querySelectorAll("#rows tbody tr"));
+const filter = document.getElementById("filter");
+const shown = document.getElementById("shown");
+const empty = document.getElementById("empty");
+let limit = {{ initial }};
+
+function apply() {
+  const needle = filter.value.trim().toLowerCase();
+  let visible = 0;
+  for (const row of rows) {
+    const matches = needle === "" || row.dataset.name.includes(needle);
+    row.hidden = !matches || (needle === "" && visible >= limit);
+    if (!row.hidden) { visible += 1; }
   }
-});
+  shown.textContent = visible.toLocaleString();
+  // The page carries the largest step; the JSON carries every ranked project.
+  // Without this, searching for something ranked past the page looks identical
+  // to searching for something that is not ranked at all.
+  empty.hidden = visible !== 0;
+}
+
+filter.addEventListener("input", apply);
+for (const button of document.querySelectorAll("[data-limit]")) {
+  button.addEventListener("click", () => {
+    limit = Number(button.dataset.limit);
+    apply();
+  });
+}
 </script>
 {% endblock %}

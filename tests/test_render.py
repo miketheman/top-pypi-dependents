@@ -35,23 +35,25 @@ def payload() -> dict:
     )
 
 
-def test_renders_one_page_per_tier_plus_index(tmp_path: Path, payload: dict) -> None:
+def test_renders_one_rankings_page_plus_index(tmp_path: Path, payload: dict) -> None:
+    """One page with reveal steps, replacing a page per tier."""
     render.render_site(payload, tmp_path, tiers=(2, 5))
     assert (tmp_path / "index.html").exists()
-    assert (tmp_path / "top-2.html").exists()
-    assert (tmp_path / "top-5.html").exists()
+    assert (tmp_path / "rankings.html").exists()
+    assert not (tmp_path / "top-2.html").exists()
+    assert not (tmp_path / "top-5.html").exists()
 
 
 def test_page_contains_ranked_rows(tmp_path: Path, payload: dict) -> None:
     render.render_site(payload, tmp_path, tiers=(2,))
-    html = (tmp_path / "top-2.html").read_text(encoding="utf-8")
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert "requests" in html
     assert "pypi.org/project/requests/" in html
 
 
 def test_page_shows_rank_movement(tmp_path: Path, payload: dict) -> None:
     render.render_site(payload, tmp_path, tiers=(2,))
-    html = (tmp_path / "top-2.html").read_text(encoding="utf-8")
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert "&#9650; 3" in html  # requests climbed from 4 to 1
 
 
@@ -59,13 +61,13 @@ def test_tier_larger_than_the_payload_does_not_crash(
     tmp_path: Path, payload: dict
 ) -> None:
     render.render_site(payload, tmp_path, tiers=(10_000,))
-    html = (tmp_path / "top-10000.html").read_text(encoding="utf-8")
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert "requests" in html
 
 
 def test_page_is_self_contained(tmp_path: Path, payload: dict) -> None:
     render.render_site(payload, tmp_path, tiers=(2,))
-    html = (tmp_path / "top-2.html").read_text(encoding="utf-8")
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert "http://" not in html.replace("http://www.w3.org", "")
     assert "cdn." not in html
 
@@ -145,10 +147,10 @@ def test_footer_pluralises_the_dependent_threshold(
     assert "at least 2 dependents are listed" in text
 
 
-def test_tier_pages_carry_the_same_footer(tmp_path: Path, payload: dict) -> None:
+def test_rankings_page_carries_the_same_footer(tmp_path: Path, payload: dict) -> None:
     """A "Top 100" page under "1,003,087 projects" is where this misleads most."""
     render.render_site(payload, tmp_path, tiers=(2,))
-    text = (tmp_path / "top-2.html").read_text(encoding="utf-8")
+    text = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert "3 projects with at least 1 dependent are listed" in text
 
 
@@ -185,3 +187,45 @@ def test_payload_shape_shows_one_row_not_all_of_them(
     render.render_site(payload, tmp_path, tiers=(2,))
     text = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert text.count("&#34;rank&#34;:") == 1
+
+
+def test_rows_past_the_first_step_start_hidden(tmp_path: Path, payload: dict) -> None:
+    """Hidden in the markup, not by script: the point is to skip their layout."""
+    render.render_site(payload, tmp_path, tiers=(1, 3))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    rows = [
+        line.strip()
+        for line in html.splitlines()
+        if line.strip().startswith("<tr data-name=")
+    ]
+    assert len(rows) == 3
+    assert sum(1 for row in rows if row.endswith(" hidden>")) == 2
+
+
+def test_a_reveal_button_is_offered_for_each_further_step(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, tiers=(1, 2, 3))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    assert 'data-limit="2"' in html
+    assert 'data-limit="3"' in html
+    # The first step is what the page already shows, so it needs no button.
+    assert 'data-limit="1"' not in html
+
+
+def test_rankings_page_holds_rows_up_to_the_largest_step(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, tiers=(1, 2))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    assert html.count("<tr data-name=") == 2
+
+
+def test_a_search_with_no_match_explains_the_page_is_bounded(
+    tmp_path: Path, payload: dict
+) -> None:
+    """The page holds the largest step; the JSON lists every ranked project."""
+    render.render_site(payload, tmp_path, tiers=(1, 2))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    assert 'id="empty"' in html
+    assert "latest.json" in html

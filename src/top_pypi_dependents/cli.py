@@ -155,7 +155,9 @@ def _render(args: argparse.Namespace) -> int:
         raise SystemExit(msg) from None
     with log.stage(LOGGER, "render") as outcome:
         render.render_site(payload, Path(args.output), tiers=tiers)
-        outcome["pages"] = len(tiers) + 1
+        steps = sorted(set(tiers))
+        outcome["rows"] = min(len(payload["rows"]), steps[-1])
+        outcome["steps"] = ",".join(str(step) for step in steps)
     return 0
 
 

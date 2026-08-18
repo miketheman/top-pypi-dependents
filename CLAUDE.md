@@ -178,6 +178,14 @@ inside the long loops.
 That is what the site serves, and `site.yml` republishes it from the committed
 `data/latest.json` without touching BigQuery whenever a template changes.
 
+**`--tiers` are reveal steps, not separate pages.** `render` writes one
+`rankings.html` holding the largest tier, showing the smallest, with a button per
+step in between. Rows past the first step carry the `hidden` attribute in the
+markup — putting them behind script instead would make the browser lay out all
+10,000 first, which is the cost this exists to avoid. The filter and the step
+limit share one pass, because they are one decision per row; two handlers each
+setting `hidden` would fight. A search intentionally ignores the limit.
+
 ## Conventions
 
 - Commit messages: plain imperative subject, no `feat:` prefix, no scope tag.

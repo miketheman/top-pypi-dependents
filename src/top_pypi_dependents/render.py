@@ -66,11 +66,14 @@ def render_site(
     *,
     tiers: Sequence[int] = TIERS,
 ) -> None:
-    """Write ``index.html`` and one page per tier into ``out_dir``."""
+    """Write ``index.html``, ``rankings.html`` and both JSON copies into ``out_dir``.
+
+    ``tiers`` are the reveal steps on the rankings page, smallest shown first.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
+    steps = sorted(set(tiers))
     env = _environment()
     shared = {
-        "tiers": list(tiers),
         "generated_at": _readable_date(payload["generated_at"]),
         "source": _SOURCE_LABELS.get(payload["source"], payload["source"]),
         "project_count": payload["project_count"],
@@ -101,9 +104,15 @@ def render_site(
     (out_dir / "index.html").write_text(
         env.get_template("index.html.j2").render(**shared), encoding="utf-8"
     )
-    table = env.get_template("table.html.j2")
-    for tier in tiers:
-        (out_dir / f"top-{tier}.html").write_text(
-            table.render(tier=tier, rows=payload["rows"][:tier], **shared),
-            encoding="utf-8",
-        )
+
+    # One page, revealed in steps, rather than a page per tier. The largest step
+    # bounds what the page carries; the smallest is what it shows on arrival.
+    # Rows past that are `hidden` in the markup rather than hidden by script, so
+    # the browser never lays them out -- which is the whole point, and would be
+    # lost if 10,000 rows rendered before JavaScript cut them back.
+    (out_dir / "rankings.html").write_text(
+        env.get_template("table.html.j2").render(
+            rows=payload["rows"][: steps[-1]], steps=steps, initial=steps[0], **shared
+        ),
+        encoding="utf-8",
+    )

@@ -81,6 +81,13 @@ uv run top-pypi-dependents artifacts --database build/dev.duckdb --output build/
 uv run top-pypi-dependents render --payload build/latest.json --output site --tiers 5,20
 ```
 
+`render` writes `index.html` and a single `rankings.html`. `--tiers` are the reveal
+steps on that page: the smallest is shown on arrival, the largest bounds what the
+page carries, and each step in between gets a button. Rows past the first step are
+`hidden` in the markup rather than by script, so the browser skips their layout.
+Searching deliberately looks past the current step — a project you can name should
+be findable whether or not it is on screen.
+
 `build` refuses a corpus smaller than half a million projects, because a real run
 never sees one and a truncated extract must not overwrite a good ranking. The two
 `--min-*` flags lower that floor for the 16-project fixture corpus; a production
