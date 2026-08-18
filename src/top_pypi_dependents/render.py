@@ -23,6 +23,25 @@ _SOURCE_LABELS = {
 }
 
 
+def _asset_month(generated_at: str) -> str:
+    """``YYYY-MM``, which is how the monthly release names its assets."""
+    try:
+        moment = datetime.fromisoformat(generated_at).astimezone(UTC)
+    except ValueError:
+        return "YYYY-MM"
+    return f"{moment:%Y-%m}"
+
+
+def _payload_shape(payload: dict[str, Any]) -> str:
+    """The published payload with a single row kept, as a shape to read.
+
+    Generated from the payload being rendered rather than written by hand, so
+    it cannot drift from what the site actually serves.
+    """
+    sample = {**payload, "rows": payload["rows"][:1]}
+    return json.dumps(sample, indent=2)
+
+
 def _readable_date(generated_at: str) -> str:
     """Format the payload's ISO timestamp for a human, or pass it through."""
     try:
@@ -61,6 +80,11 @@ def render_site(
         # not since `min_dependents` started cutting the single-dependent tail.
         "row_count": len(payload["rows"]),
         "min_dependents": payload.get("counting", {}).get("min_dependents", 1),
+        # Release assets are named for the month they cover, so the example
+        # queries derive it rather than hardcoding a month that goes stale on
+        # the next run.
+        "asset_month": _asset_month(payload["generated_at"]),
+        "payload_shape": _payload_shape(payload),
     }
 
     # Served from Pages rather than linked out of the git repository: a raw-git

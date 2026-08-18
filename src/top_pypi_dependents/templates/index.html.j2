@@ -41,4 +41,48 @@ monthly.</p>
 <a href="latest.min.json">latest.min.json</a> to fetch. Both hold the same payload.
 The complete dependency graph is published as a DuckDB database and a Parquet edge list
 on each <a href="https://github.com/miketheman/top-pypi-dependents/releases">release</a>.</p>
+
+<h3>What the JSON looks like</h3>
+<p>The shape below is generated from the payload this page was built from, so it cannot
+drift from what is served. Only the first row is shown; <code>rows</code> continues for
+all {{ "{:,}".format(row_count) }} listed projects.</p>
+<pre><code>{{ payload_shape }}</code></pre>
+<p><code>previous_rank</code> and <code>rank_change</code> are null for projects that were
+not in last month's list. <code>counting.min_dependents</code> is the threshold a project
+had to clear to appear at all.</p>
+
+<h3>Querying the graph</h3>
+<p>The Parquet edge list carries the liveness of both endpoints, so it can reproduce the
+ranking on its own &mdash; no database needed. With the
+<a href="https://duckdb.org/docs/installation/">DuckDB CLI</a>:</p>
+<pre><code>SELECT dependency, count(DISTINCT dependent) AS dependents
+FROM 'edges-{{ asset_month }}.parquet'
+WHERE is_runtime AND dependent_is_live AND dependency_is_live
+GROUP BY dependency
+ORDER BY dependents DESC
+LIMIT 10;</code></pre>
+<p><strong>Use <code>count(DISTINCT dependent)</code>, not <code>count(*)</code>.</strong>
+A project can declare the same dependency more than once under different markers, so
+counting rows overcounts &mdash; it puts numpy at 92,112 rather than its actual 90,571
+dependents.</p>
+
+<p>The database carries the computed rankings too, alongside the raw edges:</p>
+<pre><code>-- What a project declares
+SELECT dependency, specifier, extra
+FROM dependencies
+WHERE dependent = 'jupyterlab' AND is_runtime
+ORDER BY dependency;
+
+-- The dependencies most often hidden behind an extra
+SELECT dependency, count(*) AS gated
+FROM dependencies
+WHERE extra IS NOT NULL
+GROUP BY dependency
+ORDER BY gated DESC
+LIMIT 10;</code></pre>
+<p>That second query is why the headline column excludes extras: it returns pytest,
+pytest-cov, ruff and mypy &mdash; test tooling, not what the ecosystem runs on.</p>
+<p>Open the database with
+<code>duckdb dependents-{{ asset_month }}.duckdb</code>. Both files hold one snapshot per
+monthly run, keyed by <code>snapshot_id</code>.</p>
 {% endblock %}

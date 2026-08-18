@@ -78,11 +78,16 @@ def test_index_states_the_methodology(tmp_path: Path, payload: dict) -> None:
 
 
 def test_footer_shows_a_readable_date(tmp_path: Path, payload: dict) -> None:
-    """A microsecond ISO timestamp is machine detail; the page is for people."""
+    """A microsecond ISO timestamp is machine detail; the page is for people.
+
+    Scoped to the footer line: the payload sample further up the page quotes the
+    raw `generated_at` on purpose, because that is what the JSON really holds.
+    """
     render.render_site(payload, tmp_path, tiers=(2,))
     text = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert "September 1, 2026" in text
-    assert "2026-09-01T00:00:00+00:00" not in text
+    footer = next(line for line in text.splitlines() if "Generated" in line)
+    assert "September 1, 2026" in footer
+    assert "2026-09-01T00:00:00+00:00" not in footer
 
 
 def test_footer_names_a_bigquery_source_in_prose(tmp_path: Path, payload: dict) -> None:
@@ -145,3 +150,38 @@ def test_tier_pages_carry_the_same_footer(tmp_path: Path, payload: dict) -> None
     render.render_site(payload, tmp_path, tiers=(2,))
     text = (tmp_path / "top-2.html").read_text(encoding="utf-8")
     assert "3 projects with at least 1 dependent are listed" in text
+
+
+def test_index_shows_query_examples(tmp_path: Path, payload: dict) -> None:
+    """The release assets are useless to someone who cannot see a starting query."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "count(DISTINCT dependent)" in text
+    assert "edges-2026-09.parquet" in text
+    assert "dependents-2026-09.duckdb" in text
+
+
+def test_query_examples_name_the_month_of_the_data(
+    tmp_path: Path, payload: dict
+) -> None:
+    """Hardcoding a month would leave the examples wrong from the next run on."""
+    payload["generated_at"] = "2027-01-01T00:00:00+00:00"
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "edges-2027-01.parquet" in text
+
+
+def test_index_shows_the_payload_shape(tmp_path: Path, payload: dict) -> None:
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "schema_version" in text
+    assert "min_dependents" in text
+
+
+def test_payload_shape_shows_one_row_not_all_of_them(
+    tmp_path: Path, payload: dict
+) -> None:
+    """A schema sample carrying every row would be the artifact, not a sample."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert text.count("&#34;rank&#34;:") == 1
