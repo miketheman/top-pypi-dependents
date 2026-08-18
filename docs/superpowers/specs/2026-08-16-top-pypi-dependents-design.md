@@ -1,7 +1,8 @@
 # top-pypi-dependents — design
 
 Date: 2026-08-16
-Status: approved, pending implementation plan
+Status: implemented and running in production since 2026-08-17. This document is
+the design reasoning; CLAUDE.md carries the current state.
 
 ## Goal
 
