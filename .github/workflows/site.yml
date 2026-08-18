@@ -5,12 +5,17 @@ name: Site
 # `bigquery` dependency group -- so a template change costs a checkout and a
 # render rather than a billable extract. `refresh.yml` still owns the monthly
 # data run and deploys its own result.
+#
+# `data/latest.json` is watched for a hand-regenerated payload. The monthly run
+# cannot double-deploy through it: that commit is pushed with GITHUB_TOKEN, and
+# GitHub does not start workflows from those.
 on:
   push:
     branches: [main]
     paths:
       - "src/top_pypi_dependents/templates/**"
       - "src/top_pypi_dependents/render.py"
+      - "data/latest.json"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
