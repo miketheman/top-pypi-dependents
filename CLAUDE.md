@@ -153,8 +153,8 @@ prek run --all-files  # the git-hook gate; must pass on a clean clone
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 136 passed, 3 skipped
-uv sync --group bigquery       # 139 passed, 0 skipped
+uv sync                        # 155 passed, 3 skipped
+uv sync --group bigquery       # 158 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
@@ -167,24 +167,44 @@ uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duc
     --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb \
     --output build/latest.json --limit 20 --min-dependents 1
-uv run top-pypi-dependents render --payload build/latest.json --output site --tiers 5,20
+uv run top-pypi-dependents render --payload build/latest.json --output site --rows 20
 ```
 
 Every stage logs progress and outcomes to stderr; stdout stays the result.
 `--log-level debug` (global, before the subcommand) adds row and byte counters
 inside the long loops.
 
-`render` also writes `latest.json` and `latest.min.json` into the site output.
-That is what the site serves, and `site.yml` republishes it from the committed
-`data/latest.json` without touching BigQuery whenever a template changes.
+`render` also writes `latest.json`, `latest.min.json` and `search-index.json`
+into the site output. That is what the site serves, and `site.yml` republishes it
+from the committed `data/latest.json` without touching BigQuery whenever a
+template changes.
 
-**`--tiers` are reveal steps, not separate pages.** `render` writes one
-`rankings.html` holding the largest tier, showing the smallest, with a button per
-step in between. Rows past the first step carry the `hidden` attribute in the
-markup — putting them behind script instead would make the browser lay out all
-10,000 first, which is the cost this exists to avoid. The filter and the step
-limit share one pass, because they are one decision per row; two handlers each
-setting `hidden` would fight. A search intentionally ignores the limit.
+**The site is two pages, and the ranking is the root.** `index.html` is the table
+and nothing else, closing with a short summary of the counting rules and a link;
+`data.html` carries the full method, the known limitations, the published files, the
+payload shape and the DuckDB and Parquet queries. A reader who came for the graph may
+never look at the table, and a reader who came for a rank should not scroll past a SQL
+block to get one.
+
+**The page lists rows; it does not reveal them.** `--rows` (default
+`render.ROWS`, 1,000) is how many ranked projects the ranked page carries, and all
+of them are visible. There was a reveal ladder — 100 shown of 1,000 of 10,000, with
+buttons — and it existed so the filter had something to search. `search-index.json`
+answers for every ranked project now, so the ladder bounded nothing and cost three
+bugs: focus vanishing when a button hid itself, an unclamped first step rendering
+"Showing 5 of 3", and a filter that had to special-case the limit. Do not
+reintroduce it without a reason the index does not already cover.
+
+**The page does not carry every ranked project, and must not.** It lists `--rows`;
+`search-index.json` carries all of them as positional arrays, and the page fetches
+it on the first search to answer for the rest. A miss in the filter means genuinely
+not ranked, which is what the empty state says.
+
+**The Change column disappears when nothing moved.** A first run has no prior month,
+so every row reads `new` and the column carries no information; `render` omits it
+until some project's `rank_change` is not null. Both it and `Incl. extras` carry
+`hide-narrow`: a phone keeps rank, project and the ranked count, because four
+columns do not fit and the ranked count is the one the page sorts on.
 
 ## Conventions
 

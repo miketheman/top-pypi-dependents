@@ -78,15 +78,18 @@ uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duc
   --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb --output build/latest.json \
   --limit 20 --min-dependents 1
-uv run top-pypi-dependents render --payload build/latest.json --output site --tiers 5,20
+uv run top-pypi-dependents render --payload build/latest.json --output site --rows 20
 ```
 
-`render` writes `index.html` and a single `rankings.html`. `--tiers` are the reveal
-steps on that page: the smallest is shown on arrival, the largest bounds what the
-page carries, and each step in between gets a button. Rows past the first step are
-`hidden` in the markup rather than by script, so the browser skips their layout.
-Searching deliberately looks past the current step — a project you can name should
-be findable whether or not it is on screen.
+`render` writes `index.html` (the ranking), `data.html` (the method, the limits and
+the query examples), both JSON copies, and `search-index.json`. `--rows` is how
+many ranked projects the ranked page lists, all of them visible.
+
+Searching looks past the page. It lists a thousand projects; `search-index.json`
+holds every ranked one, and the page fetches it on the first search — never on
+arrival — so a project you can name is findable whether or not it was rendered.
+That is also why the page needs no reveal control: the ladder that used to bound
+layout existed so the filter had something to search, and the index replaced it.
 
 `build` refuses a corpus smaller than half a million projects, because a real run
 never sees one and a truncated extract must not overwrite a good ranking. The two

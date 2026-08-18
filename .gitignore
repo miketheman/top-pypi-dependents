@@ -9,3 +9,8 @@ site/
 .pytest_cache/
 .ruff_cache/
 .install.stamp
+
+# Scratch from design-review tooling: browser automation output, and the
+# sidecar/critique files Impeccable regenerates on demand.
+.playwright-mcp/
+.impeccable/
