@@ -148,16 +148,10 @@ def _render(args: argparse.Namespace) -> int:
     if payload is None:
         msg = f"{args.payload} not found; run `artifacts` first"
         raise SystemExit(msg)
-    try:
-        tiers = tuple(int(part) for part in args.tiers.split(","))
-    except ValueError:
-        msg = f"--tiers must be a comma-separated list of integers, not {args.tiers!r}"
-        raise SystemExit(msg) from None
     with log.stage(LOGGER, "render") as outcome:
-        render.render_site(payload, Path(args.output), tiers=tiers)
-        steps = sorted(set(tiers))
-        outcome["rows"] = min(len(payload["rows"]), steps[-1])
-        outcome["steps"] = ",".join(str(step) for step in steps)
+        render.render_site(payload, Path(args.output), rows=args.rows)
+        outcome["listed"] = min(len(payload["rows"]), args.rows)
+        outcome["ranked"] = len(payload["rows"])
     return 0
 
 
@@ -234,7 +228,7 @@ def _parser() -> argparse.ArgumentParser:
         "--payload", default="data/latest.json", help="the ranked JSON to render"
     )
     site.add_argument("--output", default="site")
-    site.add_argument("--tiers", default="100,1000,10000")
+    site.add_argument("--rows", type=int, default=render.ROWS)
     site.set_defaults(func=_render)
 
     return parser

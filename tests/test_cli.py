@@ -54,8 +54,8 @@ def test_end_to_end_from_fixture(tmp_path: Path) -> None:
                 str(out_json),
                 "--output",
                 str(site),
-                "--tiers",
-                "2,5",
+                "--rows",
+                "5",
             ]
         )
         == 0
@@ -199,10 +199,10 @@ def test_build_refuses_the_fixture_corpus_at_the_production_floors(
     assert excinfo.value.code != 0
 
 
-def test_render_with_non_numeric_tiers_exits_with_a_message(tmp_path: Path) -> None:
+def test_render_with_a_non_numeric_row_count_exits(tmp_path: Path) -> None:
     payload = tmp_path / "latest.json"
     payload.write_text(json.dumps({"rows": []}), encoding="utf-8")
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(SystemExit):
         main(
             [
                 "render",
@@ -210,11 +210,10 @@ def test_render_with_non_numeric_tiers_exits_with_a_message(tmp_path: Path) -> N
                 str(payload),
                 "--output",
                 str(tmp_path / "site"),
-                "--tiers",
+                "--rows",
                 "abc",
             ]
         )
-    assert "comma-separated list of integers" in str(excinfo.value)
 
 
 def test_render_without_a_payload_exits_nonzero(tmp_path: Path) -> None:

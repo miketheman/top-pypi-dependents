@@ -1,9 +1,10 @@
 {% extends "base.html.j2" %}
+{% block title %}Top PyPI Dependents{% endblock %}
+{% block description %}Every PyPI project ranked by how many other projects declare an unconditional runtime dependency on it.{% endblock %}
 {% block content %}
 <h1>Top PyPI Dependents</h1>
-<p class="lede">Which PyPI projects does the rest of PyPI actually depend on? This ranks
-projects by the number of other projects that declare a dependency on them, refreshed
-monthly.</p>
+<p class="lede">PyPI projects ranked by how many other projects declare an unconditional
+runtime dependency on them, read from each project's latest release.</p>
 
 <svg class="ornament" width="120" height="16" viewBox="0 0 120 16" fill="none"
     stroke="currentColor" aria-hidden="true">
@@ -13,76 +14,246 @@ monthly.</p>
   <path d="M74 8h46" stroke-width="1"/>
 </svg>
 
+<p class="hint" id="filter-hint">Searches all {{ "{:,}".format(row_count) }} ranked
+  projects, not just the {{ "{:,}".format(rows | length) }} listed here.</p>
+{# The field and the count travel together, and on a phone they stay put: with a
+  keyboard open the viewport halves, and results that render below a screenful of
+  masthead are results nobody can read while typing. #}
+<div class="search">
+<label class="label" for="filter">Filter</label>
+<input id="filter" type="search" placeholder="Project name" autocomplete="off"
+  aria-describedby="filter-hint">
+
+<p class="count">Showing <span id="shown">{{ "{:,}".format(rows | length) }}</span>
+  of {{ "{:,}".format(row_count) }} ranked projects.</p>
+</div>
+
+{# Two different answers to an empty table, and they must not be confused: the
+  index is still arriving, or the project is genuinely not ranked. #}
+<p class="note" id="beyond-note" hidden></p>
+
+<p class="note" id="empty" hidden>Not ranked. Every project with at least
+  {{ min_dependents }} dependent{{ "s" if min_dependents != 1 else "" }} is in
+  <a href="latest.json">latest.json</a>.</p>
+
+{# One polite region for the whole page. The visible count updates instantly;
+  this announces the same thing on a delay, so a screen reader is not read a new
+  total on every keystroke. #}
+<p class="sr-only" id="announce" role="status"></p>
+
+<table id="rows">
+  <caption class="sr-only">PyPI projects in rank order, most depended on first.
+    Dependents counts unconditional runtime dependencies; Incl. extras counts
+    every declared one.</caption>
+  <thead>
+    <tr>
+      {# "#" announces as "number sign". The column holds the answer this page
+        exists to give, so it says its own name. #}
+      <th class="num" scope="col"><span aria-hidden="true">#</span><span class="sr-only">Rank</span></th>
+      <th scope="col">Project</th>
+      <th class="num" scope="col">Dependents</th>
+      <th class="num hide-narrow" scope="col">Incl. extras</th>
+      {% if show_change %}
+      <th class="num hide-narrow" scope="col">Change</th>
+      {% endif %}
+    </tr>
+  </thead>
+  <tbody id="page-rows">
+  {% for row in rows %}
+    <tr data-name="{{ row.project }}">
+      <td class="num rank">{{ "{:,}".format(row.rank) }}</td>
+      <td><a href="https://pypi.org/project/{{ row.project }}/">{{ row.project }}</a></td>
+      <td class="num">{{ "{:,}".format(row.dependents) }}</td>
+      <td class="num hide-narrow">{{ "{:,}".format(row.dependents_all) }}</td>
+      {% if show_change %}
+      <td class="num move hide-narrow">
+      {%- if row.rank_change is none %}<span class="new">new</span>
+      {%- elif row.rank_change > 0 %}<span class="up">&#9650; <span class="sr-only">up </span>{{ row.rank_change }}</span>
+      {%- elif row.rank_change < 0 %}<span class="dn">&#9660; <span class="sr-only">down </span>{{ -row.rank_change }}</span>
+      {%- else %}<span class="flat">&ndash;<span class="sr-only">unchanged</span></span>{% endif -%}
+      </td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+  {# Filled from search-index.json with matches ranked past this page. #}
+  <tbody id="beyond"></tbody>
+</table>
+
 <h2>How it is counted</h2>
-<ul>
-  <li>One release per project &mdash; the highest final release by PEP&nbsp;440 ordering,
-      falling back to the highest prerelease for projects that have only prereleases.</li>
-  <li>The headline number counts distinct projects declaring an <em>unconditional runtime</em>
-      dependency. Dependencies gated behind an <code>extra</code> are counted separately, in
-      the &ldquo;incl. extras&rdquo; column. That distinction matters: roughly 37% of all
-      declared edges are extras-gated, which is why an unfiltered count puts test tooling
-      above numpy.</li>
-  <li>Names are normalized per PEP&nbsp;503, so <code>Zope.Interface</code> and
-      <code>zope-interface</code> are one project.</li>
-  <li>Only projects still live on PyPI are ranked, and only live projects count as
-      dependents.</li>
-</ul>
+<p>One release per project &mdash; the latest final release by PEP&nbsp;440 ordering. The
+ranked number counts only <em>unconditional runtime</em> dependencies; anything gated
+behind an <code>extra</code> is counted separately, under &ldquo;incl. extras&rdquo;. Only
+projects
+still live on PyPI are ranked, and only live projects count as dependents.</p>
+<p>More on <a href="data.html">how this is counted, what it cannot tell you, and how to
+query the full dependency graph</a>.</p>
+<script>
+// Matches against data-name rather than a cell's text: position-independent,
+// so inserting a column cannot silently make this filter the wrong one, and
+// the value is already canonical lowercase so there is nothing to normalize
+// per row.
+//
+// A search looks past the page. The page lists the top rows; every ranked
+// project is in `search-index.json`, so a name someone can type is findable
+// whether or not it was rendered. The index is fetched on the first search,
+// never on arrival -- a reader who only reads the table pays nothing for it.
+// Jinja's `{:,}` is en-US whatever the reader's locale, so this matches it
+// rather than following the browser: the two halves share one column.
+const fmt = (n) => n.toLocaleString("en-US");
 
-<h2>Known limitations</h2>
-<ul>
-  <li>Yanked releases cannot be excluded. The source table carries no yank status, and
-      determining it would take one request per project.</li>
-  <li>Only declared dependencies count. Transitive dependencies are not resolved.</li>
-</ul>
+// Every name in the payload is PEP 503 canonical, so the needle has to be
+// too. Without this, `zope.interface` and `typing_extensions` -- the way
+// their own docs spell them -- match nothing, and the page answers "Not
+// ranked." about projects it is listing.
+const canonical = (value) => value.trim().toLowerCase().replace(/[-_.]+/g, "-");
 
-<h2>Data</h2>
-<p>The full ranked list is published here, rewritten by each monthly run:
-<a href="latest.json">latest.json</a> to read, or
-<a href="latest.min.json">latest.min.json</a> to fetch. Both hold the same payload.
-The complete dependency graph is published as a DuckDB database and a Parquet edge list
-on each <a href="https://github.com/miketheman/top-pypi-dependents/releases">release</a>.</p>
+const rows = Array.from(document.querySelectorAll("#page-rows tr"));
+const filter = document.getElementById("filter");
+const shown = document.getElementById("shown");
+const empty = document.getElementById("empty");
+const beyond = document.getElementById("beyond");
+const table = document.getElementById("rows");
+const beyondNote = document.getElementById("beyond-note");
+const announce = document.getElementById("announce");
+const onPage = {{ on_page }};
+const ranked = {{ row_count }};
+const showChange = {{ "true" if show_change else "false" }};
+// Enough to prove a project exists and where it sits; a filter that matched
+// thousands past the page would rebuild the very document this page shed.
+const BEYOND_LIMIT = 50;
+let announceTimer;
+let index = null;
+let indexState = "idle";
 
-<h3>What the JSON looks like</h3>
-<p>The shape below is generated from the payload this page was built from, so it cannot
-drift from what is served. Only the first row is shown; <code>rows</code> continues for
-all {{ "{:,}".format(row_count) }} listed projects.</p>
-<pre><code>{{ payload_shape }}</code></pre>
-<p><code>previous_rank</code> and <code>rank_change</code> are null for projects that were
-not in last month's list. <code>counting.min_dependents</code> is the threshold a project
-had to clear to appear at all.</p>
+function loadIndex() {
+  if (indexState !== "idle") { return; }
+  indexState = "loading";
+  fetch("search-index.json")
+    .then((response) => {
+      if (!response.ok) { throw new Error(response.status); }
+      return response.json();
+    })
+    .then((data) => { index = data.projects; indexState = "ready"; apply(); })
+    .catch(() => { indexState = "failed"; apply(); });
+}
 
-<h3>Querying the graph</h3>
-<p>The Parquet edge list carries the liveness of both endpoints, so it can reproduce the
-ranking on its own &mdash; no database needed. With the
-<a href="https://duckdb.org/docs/installation/">DuckDB CLI</a>:</p>
-<pre><code>SELECT dependency, count(DISTINCT dependent) AS dependents
-FROM 'edges-{{ asset_month }}.parquet'
-WHERE is_runtime AND dependent_is_live AND dependency_is_live
-GROUP BY dependency
-ORDER BY dependents DESC
-LIMIT 10;</code></pre>
-<p><strong>Use <code>count(DISTINCT dependent)</code>, not <code>count(*)</code>.</strong>
-A project can declare the same dependency more than once under different markers, so
-counting rows overcounts &mdash; it puts numpy at 92,112 rather than its actual 90,571
-dependents.</p>
+function cell(className, text) {
+  const td = document.createElement("td");
+  if (className) { td.className = className; }
+  td.textContent = text;
+  return td;
+}
 
-<p>The database carries the computed rankings too, alongside the raw edges:</p>
-<pre><code>-- What a project declares
-SELECT dependency, specifier, extra
-FROM dependencies
-WHERE dependent = 'jupyterlab' AND is_runtime
-ORDER BY dependency;
+// The glyph carries the direction for anyone who can see it; the hidden word
+// carries it for anyone who cannot. A rise and a fall must not be announced
+// identically.
+function movement(change) {
+  const span = document.createElement("span");
+  const said = document.createElement("span");
+  said.className = "sr-only";
+  if (change === null) { span.className = "new"; span.textContent = "new"; return span; }
+  if (change > 0) { span.className = "up"; span.append("\u25b2 "); said.textContent = "up "; }
+  else if (change < 0) { span.className = "dn"; span.append("\u25bc "); said.textContent = "down "; }
+  else { span.className = "flat"; span.append("\u2013"); said.textContent = "unchanged"; }
+  span.append(said);
+  if (change !== 0) { span.append(String(Math.abs(change))); }
+  return span;
+}
 
--- The dependencies most often hidden behind an extra
-SELECT dependency, count(*) AS gated
-FROM dependencies
-WHERE extra IS NOT NULL
-GROUP BY dependency
-ORDER BY gated DESC
-LIMIT 10;</code></pre>
-<p>That second query is why the headline column excludes extras: it returns pytest,
-pytest-cov, ruff and mypy &mdash; test tooling, not what the ecosystem runs on.</p>
-<p>Open the database with
-<code>duckdb dependents-{{ asset_month }}.duckdb</code>. Both files hold one snapshot per
-monthly run, keyed by <code>snapshot_id</code>.</p>
+function beyondRow([project, rank, dependents, dependentsAll, change]) {
+  const tr = document.createElement("tr");
+  tr.append(cell("num rank", fmt(rank)));
+
+  const name = document.createElement("td");
+  const link = document.createElement("a");
+  link.href = `https://pypi.org/project/${encodeURIComponent(project)}/`;
+  link.textContent = project;
+  name.append(link);
+  tr.append(name);
+
+  tr.append(cell("num", fmt(dependents)));
+  tr.append(cell("num hide-narrow", fmt(dependentsAll)));
+
+  if (showChange) {
+    const move = cell("num move hide-narrow", "");
+    move.append(movement(change));
+    tr.append(move);
+  }
+  return tr;
+}
+
+// Returns how many matches exist past the page, which is not the same as how
+// many were drawn: the count is the honest answer, the cap is what fits.
+function fillBeyond(needle) {
+  beyond.replaceChildren();
+  if (needle === "" || indexState !== "ready") { return 0; }
+  let found = 0;
+  const drawn = document.createDocumentFragment();
+  for (const entry of index) {
+    if (entry[1] <= onPage || !entry[0].includes(needle)) { continue; }
+    found += 1;
+    if (found <= BEYOND_LIMIT) { drawn.append(beyondRow(entry)); }
+  }
+  beyond.append(drawn);
+  return found;
+}
+
+function apply() {
+  const needle = canonical(filter.value);
+  let visible = 0;
+  for (const row of rows) {
+    const matches = needle === "" || row.dataset.name.includes(needle);
+    row.hidden = !matches;
+    if (matches) { visible += 1; }
+  }
+  if (needle !== "") { loadIndex(); }
+
+  const found = fillBeyond(needle);
+  const drawn = Math.min(found, BEYOND_LIMIT);
+  const searching = needle !== "" && indexState === "loading";
+
+  shown.textContent = fmt(visible + drawn);
+
+  if (searching) {
+    beyondNote.textContent = `Searching all ${fmt(ranked)} ranked projects...`;
+    beyondNote.hidden = false;
+  } else if (found > BEYOND_LIMIT) {
+    beyondNote.textContent =
+      `${fmt(found)} matches rank past this page; the first ${BEYOND_LIMIT} are listed below.`;
+    beyondNote.hidden = false;
+  } else if (found > 0) {
+    beyondNote.textContent =
+      `${fmt(found)} of these rank past this page.`;
+    beyondNote.hidden = false;
+  } else {
+    beyondNote.hidden = true;
+  }
+
+  // Three different nothings, and saying the wrong one is worse than silence:
+  // the index has not arrived, the index never arrived, or the project is not
+  // ranked at all.
+  empty.hidden = visible !== 0 || drawn !== 0 || searching;
+  // A head with five column labels over an empty body reads as a broken
+  // page, which is a poor frame for the page's most careful sentence.
+  table.hidden = visible === 0 && drawn === 0;
+  if (!empty.hidden && indexState === "failed") {
+    empty.textContent = `No match on this page, and the full index could not be loaded.`;
+  }
+
+  // Debounced, because this fires on every keystroke and an undebounced live
+  // region reads a new total per character typed. The visible count above is
+  // already current; only the announcement waits.
+  clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => {
+    const count = visible + drawn;
+    if (searching) { return; }
+    announce.textContent = count === 0
+      ? "Not ranked."
+      : `Showing ${fmt(count)} of ${fmt(ranked)} ranked projects.`;
+  }, 400);
+}
+
+filter.addEventListener("input", apply);
+</script>
 {% endblock %}

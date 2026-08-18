@@ -9,10 +9,13 @@ from typing import TYPE_CHECKING, Any
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
-TIERS: tuple[int, ...] = (100, 1000, 10000)
+# What the page lists. It carried ten times this behind a reveal ladder, back
+# when the filter could only search what was rendered; `search-index.json`
+# answers for every ranked project now, so the rest was markup bought for
+# scrolling nobody does.
+ROWS: int = 1000
 
 # The payload keeps the full ISO timestamp for machines. The page is read by
 # people, for whom microseconds and a UTC offset are noise on a dataset that
@@ -42,6 +45,39 @@ def _payload_shape(payload: dict[str, Any]) -> str:
     return json.dumps(sample, indent=2)
 
 
+def _search_index(payload: dict[str, Any]) -> str:
+    """Every ranked project as a positional array, for the page to search.
+
+    The rankings page renders a slice of the payload; without this the projects
+    past that slice -- the large majority of them -- cannot be looked up at all.
+    Positional arrays rather than objects because repeating five keys tens of
+    thousands of times roughly doubles a file the browser has to fetch.
+    """
+    projects = [
+        [
+            row["project"],
+            row["rank"],
+            row["dependents"],
+            row["dependents_all"],
+            row["rank_change"],
+        ]
+        for row in payload["rows"]
+    ]
+    index = {
+        "generated_at": payload["generated_at"],
+        "count": len(projects),
+        "fields": [
+            "project",
+            "rank",
+            "dependents",
+            "dependents_all",
+            "rank_change",
+        ],
+        "projects": projects,
+    }
+    return json.dumps(index, separators=(",", ":")) + "\n"
+
+
 def _readable_date(generated_at: str) -> str:
     """Format the payload's ISO timestamp for a human, or pass it through."""
     try:
@@ -64,14 +100,14 @@ def render_site(
     payload: dict[str, Any],
     out_dir: Path,
     *,
-    tiers: Sequence[int] = TIERS,
+    rows: int = ROWS,
 ) -> None:
-    """Write ``index.html``, ``rankings.html`` and both JSON copies into ``out_dir``.
+    """Write both pages, both JSON copies and the search index into ``out_dir``.
 
-    ``tiers`` are the reveal steps on the rankings page, smallest shown first.
+    ``rows`` is how many ranked projects the page lists; the search index
+    covers the rest.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    steps = sorted(set(tiers))
     env = _environment()
     shared = {
         "generated_at": _readable_date(payload["generated_at"]),
@@ -101,18 +137,31 @@ def render_site(
         json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8"
     )
 
-    (out_dir / "index.html").write_text(
-        env.get_template("index.html.j2").render(**shared), encoding="utf-8"
+    # Fetched by the rankings page only once a search runs, so it costs an
+    # arriving reader nothing.
+    (out_dir / "search-index.json").write_text(_search_index(payload), encoding="utf-8")
+
+    # The method, the limitations and the query examples, on their own page. A
+    # reader who came for the graph may never look at the table, and a reader
+    # who came for a rank should not have to scroll past a SQL block to get one.
+    (out_dir / "data.html").write_text(
+        env.get_template("data.html.j2").render(page="data", **shared),
+        encoding="utf-8",
     )
 
-    # One page, revealed in steps, rather than a page per tier. The largest step
-    # bounds what the page carries; the smallest is what it shows on arrival.
-    # Rows past that are `hidden` in the markup rather than hidden by script, so
-    # the browser never lays them out -- which is the whole point, and would be
-    # lost if 10,000 rows rendered before JavaScript cut them back.
-    (out_dir / "rankings.html").write_text(
-        env.get_template("table.html.j2").render(
-            rows=payload["rows"][: steps[-1]], steps=steps, initial=steps[0], **shared
+    # The ranking is the root: it is what the site is for, and a visitor who
+    # lands on prose has to take a second step to reach the thing they came for.
+    listed = payload["rows"][:rows]
+    (out_dir / "index.html").write_text(
+        env.get_template("index.html.j2").render(
+            page="rankings",
+            rows=listed,
+            on_page=len(listed),
+            # A first run has no month to compare against, so every row reads
+            # `new` and the column carries no information at all. It comes back
+            # by itself the month something moves.
+            show_change=any(row["rank_change"] is not None for row in payload["rows"]),
+            **shared,
         ),
         encoding="utf-8",
     )

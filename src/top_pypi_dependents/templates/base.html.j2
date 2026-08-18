@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Top PyPI Dependents{% endblock %}</title>
+{# Pasted into a chat window this is otherwise a bare URL, and a chat window is
+  where a link to this gets shared. #}
+<meta name="description" content="{% block description %}Which PyPI projects the rest of PyPI depends on, ranked by how many other projects declare a runtime dependency on them. Refreshed monthly from PyPI's own metadata.{% endblock %}">
+<meta property="og:title" content="{{ self.title() }}">
+<meta property="og:description" content="{{ self.description() }}">
+<meta property="og:type" content="website">
+{# The leaf from the ornament, inline rather than a file: a second request would
+  break the promise that a page is self-contained, and an absent icon is a 404
+  on every visit plus a blank square in the tab. Two of them, because a tab
+  strip has a theme too and the dark accent disappears against a dark one. #}
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c6-9 18-9 24 0-6 9-18 9-24 0z' fill='none' stroke='%233f5a3a' stroke-width='2'/%3E%3Cpath d='M4 16h24' fill='none' stroke='%233f5a3a' stroke-width='1.2'/%3E%3C/svg%3E">
+<link rel="icon" media="(prefers-color-scheme: dark)" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c6-9 18-9 24 0-6 9-18 9-24 0z' fill='none' stroke='%23a2c087' stroke-width='2'/%3E%3Cpath d='M4 16h24' fill='none' stroke='%23a2c087' stroke-width='1.2'/%3E%3C/svg%3E">
 <style>
   /* Design system: miketheman.dev "herbarium sheet".
     Warm paper and ink, one green, hairline rules, zero shadows.
@@ -11,12 +23,22 @@
     fetched -- this page must stay self-contained -- so they fall back to
     ui-serif / ui-sans-serif unless the reader has them installed. */
   :root {
+    /* Both themes are hand-authored below; this tells the browser so, which is
+      what themes the parts we do not draw -- the caret, the scrollbar, and the
+      search field's own clear button. Without it those stay light on a dark
+      page. */
+    color-scheme: light dark;
+    scrollbar-color: var(--rule) transparent;
+
     --paper: #f4f1ea;
     --ink: #1c1a17;
     --ink-muted: #5a554d;
     --ink-subtle: #6b6559;
     --rule: #d8d2c4;
-    --surface-hover: #ebe4d4;
+    /* Dark enough to register: on a wide table whose only other row-tracking
+      aid is a hairline, a tint under 1.15:1 against paper is a hover state
+      nobody can see. */
+    --surface-hover: #e2d9c2;
     --accent: #3f5a3a;
 
     --serif: Petrona, ui-serif, Georgia, serif;
@@ -33,7 +55,7 @@
       --ink-muted: #a6a094;
       --ink-subtle: #90897d;
       --rule: #2d2b26;
-      --surface-hover: #1e1c17;
+      --surface-hover: #2b2721;
       --accent: #a2c087;
     }
   }
@@ -57,10 +79,27 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  a { color: inherit; }
+  a {
+    color: inherit;
+    text-underline-offset: 0.15em;
+    text-decoration-thickness: 1px;
+  }
 
-  /* Tracked caps for anything secondary. Never letterspace lowercase. */
+  /* The one browser surface that ships with a hue of its own. Inverting ink and
+    paper keeps the selection unmistakable without admitting a second color, and
+    it follows the theme for free because both tokens already do. */
+  ::selection {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* Tracked caps for anything secondary. Never letterspace lowercase.
+    Block, because its one use is a field caption: inline it sat beside the
+    input on a wide screen and above it on a narrow one, changing the pattern
+    at a breakpoint that was never asked to change it. */
   .label {
+    display: block;
+    margin-bottom: 0.5rem;
     font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
     font-weight: 500;
     letter-spacing: 0.14em;
@@ -93,6 +132,7 @@
     transition: color var(--dur) var(--ease);
   }
   nav a:hover { color: var(--ink); }
+  nav a[aria-current="page"] { color: var(--ink); }
 
   /* The single serif on the page. */
   h1 {
@@ -113,20 +153,50 @@
     margin: 3rem 0 1rem;
   }
 
+  /* Below h2's tracked caps, not above them: a subsection reads as a lead-in to
+    the paragraph under it, so it is the body size at label weight rather than a
+    third, louder voice. The browser default is 700 at 1.17em, which would make
+    it shout past the h2 that contains it. */
+  h3 {
+    font-size: 1em;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--ink);
+    margin: 1.5rem 0 0.5rem;
+  }
+
   p { max-width: 34rem; }
   p.lede { color: var(--ink-muted); margin: 0 0 1.5rem; }
 
   ul { max-width: 34rem; padding-left: 1.25rem; }
   li { margin-bottom: 0.5rem; }
 
-  code {
+  code, pre {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
+  }
+  code { font-size: 0.9em; }
+
+  /* A code block is quoted material, so it gets the same hairline the rest of
+    the page separates with. `overflow-x` is the load-bearing line: a SQL query
+    is wider than a phone, and without it the whole document scrolls sideways
+    and every paragraph on the page ends up narrower than the screen. */
+  pre {
+    max-width: 100%;
+    margin: 1rem 0 1.5rem;
+    padding: 0 0 0 1rem;
+    border-left: 1px solid var(--rule);
+    overflow-x: auto;
   }
 
   /* The page's one decorative flourish, in the one green. */
   .ornament { display: block; margin: 3rem auto 1.5rem; color: var(--accent); }
 
+  /* Controls are outlined in --ink-subtle, not the --rule the page separates
+    with: --rule on paper is 1.34:1, and these have no fill, so that hairline is
+    the entire signal that they are controls. WCAG 1.4.11 asks 3:1 and
+    --ink-subtle gives 5.13:1. Rules and dividers stay at --rule -- they are
+    decoration, and exempt. */
   input[type="search"] {
     width: 100%;
     max-width: 24rem;
@@ -135,12 +205,30 @@
     font: inherit;
     color: var(--ink);
     background: transparent;
-    border: 1px solid var(--rule);
+    border: 1px solid var(--ink-subtle);
     border-radius: 2px;
     transition: border-color var(--dur) var(--ease);
   }
   input[type="search"]::placeholder { color: var(--ink-subtle); }
-  input[type="search"]:hover { border-color: var(--ink-muted); }
+  input[type="search"]:hover { border-color: var(--ink); }
+
+  /* The browser draws this one in its own blue -- a saturated hue arriving
+    inside the single control the reader touches, on a page that allows itself
+    one green and nothing else. `color-scheme` does not reach it: the glyph is a
+    UA-drawn mask, not a color. So it is redrawn here in ink. */
+  input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0.7em;
+    height: 0.7em;
+    cursor: pointer;
+    background-color: var(--ink-muted);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1.5 1.5l9 9M10.5 1.5l-9 9' stroke='black' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1.5 1.5l9 9M10.5 1.5l-9 9' stroke='black' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  input[type="search"]::-webkit-search-cancel-button:hover {
+    background-color: var(--ink);
+  }
 
   /* Announced, never seen. Not `display: none`, which would take it out of the
     accessibility tree and silence the live region entirely. */
@@ -156,6 +244,22 @@
     border: 0;
   }
 
+  /* Absolutely positioned rather than pulled out of flow and back in, so
+    focusing it does not shove the page down by its own height. */
+  .skip {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 2;
+    padding: 0.5rem 0.85rem;
+    background: var(--paper);
+    border: 1px solid var(--ink-subtle);
+    border-radius: 2px;
+    text-decoration: none;
+    transform: translateY(-250%);
+  }
+  .skip:focus { transform: none; }
+
   .hint {
     max-width: 34rem;
     margin: 0 0 0.5rem;
@@ -163,48 +267,61 @@
     font-size: clamp(0.8125rem, 0.79rem + 0.10vw, 0.875rem);
   }
 
-  .steps {
+  .count, .note {
     margin: 0 0 1.5rem;
     color: var(--ink-muted);
     font-size: clamp(0.875rem, 0.85rem + 0.10vw, 0.9375rem);
   }
 
-  .steps button {
-    margin-left: 0.5rem;
-    padding: 0.35rem 0.85rem;
-    font: inherit;
-    color: var(--ink);
-    background: transparent;
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    cursor: pointer;
-    transition: border-color var(--dur) var(--ease),
-                background var(--dur) var(--ease);
-  }
-
-  .steps button:hover {
-    border-color: var(--ink-muted);
-    background: var(--surface-hover);
+  /* Set apart from the running count above it: a message about what the search
+    found must not read as the count itself. The left hairline is the same one a
+    code block is quoted with -- an aside, not a reading line. */
+  .note {
+    max-width: 34rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--rule);
   }
 
   table { border-collapse: collapse; width: 100%; }
 
+  /* Sticky, because two adjacent numeric columns mean different things and a
+    reader who has scrolled past the head is guessing which is which. The rule
+    is drawn as a pseudo-element: a `border-bottom` on a sticky cell in a
+    collapsed table scrolls away with the content it was meant to sit under. */
   thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--paper);
     font-size: clamp(0.75rem, 0.73rem + 0.10vw, 0.8125rem);
     font-weight: 500;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--ink-muted);
     text-align: left;
-    padding: 0 0.75rem 0.75rem;
-    border-bottom: 1px solid var(--rule);
+    padding: 0.75rem;
     white-space: nowrap;
+  }
+
+  thead th::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 1px;
+    background: var(--rule);
   }
 
   tbody td {
     padding: 0.75rem;
     border-bottom: 1px solid var(--rule);
   }
+
+  /* The rules run edge to edge, so the data in them starts and ends on the same
+    line. Left on the outer cells, the padding insets the whole table from the
+    nav rule, the heading and the footer it is meant to align with. */
+  thead th:first-child, tbody td:first-child { padding-left: 0; }
+  thead th:last-child, tbody td:last-child { padding-right: 0; }
   tbody tr { transition: background-color var(--dur) var(--ease); }
   tbody tr:hover { background: var(--surface-hover); }
 
@@ -219,11 +336,13 @@
   }
   th.num { text-align: right; }
 
-  td.rank { color: var(--ink-subtle); width: 1%; }
+  /* Full ink, inherited: the rank is the answer the page exists to give, and
+    it should not read fainter than the counts beside it. */
+  td.rank { width: 1%; }
   td.move { color: var(--ink-muted); width: 1%; }
   td.move .flat, td.move .new { color: var(--ink-subtle); }
 
-  /* A fifth job for the accent, deliberately granted: a climb is growth, which
+  /* A third job for the accent, deliberately granted: a climb is growth, which
     is the metaphor the green already carries. A drop stays in muted ink -- a
     red would be a second chromatic voice, which this system rejects. The
     glyph, not the color, is what makes direction unambiguous. */
@@ -246,15 +365,56 @@
   @media (max-width: 34rem) {
     thead th, tbody td { padding: 0.6rem 0.4rem; }
     .hide-narrow { display: none; }
+
+    /* A phone with its keyboard open has about 500px of viewport, and this page
+      spent 441 of them on masthead before reaching the search field: typing a
+      name left exactly one result row visible. The field pins to the top so the
+      results scroll under it, and the ornament -- decoration between the lede
+      and the controls -- gives up its 64px. */
+    nav { margin-bottom: 1.5rem; }
+    .ornament { display: none; }
+
+    .search {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--paper);
+      /* Bled to the page edges, or rows scroll through the 1rem body padding
+        either side of it. */
+      margin-inline: -1rem;
+      padding: 0.75rem 1rem 0;
+      border-bottom: 1px solid var(--rule);
+    }
+    .search input[type="search"] { margin-bottom: 0.75rem; }
+    .search .count { margin-bottom: 0.75rem; }
+
+    /* Two sticky things would stack; on a phone the field is the one worth the
+      space, and three short columns are easier to hold in mind than five.
+      `relative`, not `static`: the head's hairline is an absolutely positioned
+      pseudo-element, and taking away its containing block sent it to the
+      initial one -- a viewport-wide rule painted down the page and no rule at
+      all under the headers. */
+    thead th { position: relative; }
+
+    /* `:last-child` lands on a `.hide-narrow` cell, which is `display: none`
+      here, leaving the visible right column padded and its figures short of the
+      rule. Below this breakpoint the third column is the last one drawn:
+      rank, project, and the count the page ranks on. */
+    thead th:nth-child(3), tbody td:nth-child(3) { padding-right: 0; }
   }
 </style>
 </head>
 <body>
+<a class="skip" href="#content">Skip to content</a>
+{# Two links styled identically gave a two-page site no wayfinding at all
+  beyond its own h1. #}
 <nav>
-  <a href="index.html">About</a>
-  <a href="rankings.html">Rankings</a>
+  <a href="index.html"{% if page == "rankings" %} aria-current="page"{% endif %}>Rankings</a>
+  <a href="data.html"{% if page == "data" %} aria-current="page"{% endif %}>Data</a>
 </nav>
+<main id="content">
 {% block content %}{% endblock %}
+</main>
 <footer>
   <p class="meta">Generated {{ generated_at }} from {{ source }}.</p>
   <p class="meta">Ranked from {{ "{:,}".format(project_count) }} projects and {{ "{:,}".format(edge_count) }} dependency edges.</p>
