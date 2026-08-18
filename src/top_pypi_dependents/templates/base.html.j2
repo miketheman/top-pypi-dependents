@@ -212,7 +212,8 @@
 {% block content %}{% endblock %}
 <footer>
   <p class="meta">Generated {{ generated_at }} from {{ source }}.</p>
-  <p class="meta">{{ "{:,}".format(project_count) }} projects &middot; {{ "{:,}".format(edge_count) }} dependency edges.</p>
+  <p class="meta">Ranked from {{ "{:,}".format(project_count) }} projects and {{ "{:,}".format(edge_count) }} dependency edges.</p>
+  <p class="meta">{{ "{:,}".format(row_count) }} projects with at least {{ min_dependents }} dependent{{ "s" if min_dependents != 1 else "" }} are listed.</p>
 </footer>
 </body>
 </html>

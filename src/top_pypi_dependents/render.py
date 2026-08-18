@@ -56,6 +56,11 @@ def render_site(
         "source": _SOURCE_LABELS.get(payload["source"], payload["source"]),
         "project_count": payload["project_count"],
         "edge_count": payload["edge_count"],
+        # The corpus counts above describe what was analysed. Without these two
+        # the footer reads as though the file holds a million rows, which it has
+        # not since `min_dependents` started cutting the single-dependent tail.
+        "row_count": len(payload["rows"]),
+        "min_dependents": payload.get("counting", {}).get("min_dependents", 1),
     }
 
     # Served from Pages rather than linked out of the git repository: a raw-git

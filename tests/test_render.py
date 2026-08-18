@@ -119,3 +119,29 @@ def test_index_links_both_data_downloads(tmp_path: Path, payload: dict) -> None:
     text = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "latest.json" in text
     assert "latest.min.json" in text
+
+
+def test_footer_separates_corpus_size_from_rows_listed(
+    tmp_path: Path, payload: dict
+) -> None:
+    """The corpus numbers describe what was analysed, not what the file holds."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "Ranked from 16 projects and 25 dependency edges" in text
+    assert "3 projects with at least 1 dependent are listed" in text
+
+
+def test_footer_pluralises_the_dependent_threshold(
+    tmp_path: Path, payload: dict
+) -> None:
+    payload["counting"]["min_dependents"] = 2
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "at least 2 dependents are listed" in text
+
+
+def test_tier_pages_carry_the_same_footer(tmp_path: Path, payload: dict) -> None:
+    """A "Top 100" page under "1,003,087 projects" is where this misleads most."""
+    render.render_site(payload, tmp_path, tiers=(2,))
+    text = (tmp_path / "top-2.html").read_text(encoding="utf-8")
+    assert "3 projects with at least 1 dependent are listed" in text
