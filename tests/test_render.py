@@ -440,3 +440,21 @@ def test_the_hint_and_the_count_do_not_repeat_each_other(
     assert "3" not in hint  # the ranked total belongs to the count line alone
     assert 'Showing <span id="shown">2</span>' in html
 
+
+def test_the_footer_links_the_source_it_names(tmp_path: Path, payload: dict) -> None:
+    """A reader asked to trust the number should be able to reach the table."""
+    render.render_site({**payload, "source": "bigquery"}, tmp_path, rows=2)
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert (
+        '<a href="https://docs.pypi.org/api/bigquery/#project-metadata-table">'
+        "PyPI metadata on BigQuery</a>" in html
+    )
+
+
+def test_a_source_with_no_documentation_is_not_linked(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, rows=2)
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "the checked-in fixture" in html
+    assert '<a href="https://docs.pypi.org' not in html

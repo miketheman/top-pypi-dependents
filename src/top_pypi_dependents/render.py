@@ -24,6 +24,12 @@ _SOURCE_LABELS = {
     "bigquery": "PyPI metadata on BigQuery",
     "fixture": "the checked-in fixture",
 }
+# Where the named source can be read about. A source with no public
+# documentation -- the fixture -- is named without a link rather than linked
+# somewhere approximate.
+_SOURCE_LINKS = {
+    "bigquery": "https://docs.pypi.org/api/bigquery/#project-metadata-table",
+}
 
 
 def _asset_month(generated_at: str) -> str:
@@ -112,6 +118,7 @@ def render_site(
     shared = {
         "generated_at": _readable_date(payload["generated_at"]),
         "source": _SOURCE_LABELS.get(payload["source"], payload["source"]),
+        "source_url": _SOURCE_LINKS.get(payload["source"]),
         "project_count": payload["project_count"],
         "edge_count": payload["edge_count"],
         # The corpus counts above describe what was analysed. Without these two
