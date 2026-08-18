@@ -229,3 +229,22 @@ def test_a_search_with_no_match_explains_the_page_is_bounded(
     html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
     assert 'id="empty"' in html
     assert "latest.json" in html
+
+
+def test_the_filter_says_what_it_searches(tmp_path: Path, payload: dict) -> None:
+    """Find-in-page cannot reach hidden rows, so the filter has to say it can."""
+    render.render_site(payload, tmp_path, tiers=(1, 3))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    assert 'aria-describedby="filter-hint"' in html
+    assert 'id="filter-hint"' in html
+    assert "find-in-page" in html
+
+
+def test_a_polite_status_region_reports_the_count(
+    tmp_path: Path, payload: dict
+) -> None:
+    """The visible count changing announces nothing on its own."""
+    render.render_site(payload, tmp_path, tiers=(1, 3))
+    html = (tmp_path / "rankings.html").read_text(encoding="utf-8")
+    assert 'role="status"' in html
+    assert 'id="announce"' in html

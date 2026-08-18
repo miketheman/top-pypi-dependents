@@ -13,8 +13,12 @@ runtime dependency on them, read from each project's latest release.</p>
   <path d="M74 8h46" stroke-width="1"/>
 </svg>
 
+<p class="hint" id="filter-hint">Searches all {{ "{:,}".format(rows | length) }} rows on
+  this page, including the ones not shown. Your browser's find-in-page sees only the
+  visible ones.</p>
 <label class="label" for="filter">Filter</label>
-<input id="filter" type="search" placeholder="Project name" autocomplete="off">
+<input id="filter" type="search" placeholder="Project name" autocomplete="off"
+  aria-describedby="filter-hint">
 
 <p class="steps">Showing <span id="shown">{{ "{:,}".format(initial) }}</span> of
   {{ "{:,}".format(rows | length) }}.
@@ -26,6 +30,11 @@ runtime dependency on them, read from each project's latest release.</p>
 <p class="steps" id="empty" hidden>No match in the top
   {{ "{:,}".format(rows | length) }}. All {{ "{:,}".format(row_count) }} ranked projects
   are in <a href="latest.json">latest.json</a>.</p>
+
+{# One polite region for the whole page. The visible count updates instantly; this
+   announces the same thing on a delay, so a screen reader is not read a new total
+   on every keystroke. #}
+<p class="sr-only" id="announce" role="status"></p>
 
 <table id="rows">
   <thead>
@@ -77,7 +86,10 @@ const rows = Array.from(document.querySelectorAll("#rows tbody tr"));
 const filter = document.getElementById("filter");
 const shown = document.getElementById("shown");
 const empty = document.getElementById("empty");
+const announce = document.getElementById("announce");
+const total = {{ rows | length }};
 let limit = {{ initial }};
+let announceTimer;
 
 function apply() {
   const needle = filter.value.trim().toLowerCase();
@@ -92,6 +104,16 @@ function apply() {
   // Without this, searching for something ranked past the page looks identical
   // to searching for something that is not ranked at all.
   empty.hidden = visible !== 0;
+
+  // Debounced, because this fires on every keystroke and an undebounced live
+  // region reads a new total per character typed. The visible count above is
+  // already current; only the announcement waits.
+  clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => {
+    announce.textContent = visible === 0
+      ? `No match in the top ${total.toLocaleString()}.`
+      : `Showing ${visible.toLocaleString()} of ${total.toLocaleString()}.`;
+  }, 400);
 }
 
 filter.addEventListener("input", apply);
