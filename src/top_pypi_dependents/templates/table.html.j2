@@ -31,9 +31,9 @@ runtime dependency on them, read from each project's latest release.</p>
   {{ "{:,}".format(rows | length) }}. All {{ "{:,}".format(row_count) }} ranked projects
   are in <a href="latest.json">latest.json</a>.</p>
 
-{# One polite region for the whole page. The visible count updates instantly; this
-   announces the same thing on a delay, so a screen reader is not read a new total
-   on every keystroke. #}
+{# One polite region for the whole page. The visible count updates instantly;
+  this announces the same thing on a delay, so a screen reader is not read a new
+  total on every keystroke. #}
 <p class="sr-only" id="announce" role="status"></p>
 
 <table id="rows">
