@@ -86,13 +86,11 @@ def test_a_pair_declared_only_behind_an_extra_is_an_extra_edge() -> None:
     payload = graph.build_graph(con, snapshot_id, min_dependents=0)
     names = payload["names"]
 
-    def pairs(flat: list[int]) -> list[tuple[str, str]]:
-        return [
-            (names[a], names[b]) for a, b in zip(flat[::2], flat[1::2], strict=True)
-        ]
+    def pairs(encoded: dict[str, list[int]]) -> list[tuple[str, str]]:
+        return [(names[a], names[b]) for a, b in graph.decode_edges(encoded)]
 
-    assert pairs(payload["edges"]) == [("app", "lib"), ("tool", "lib")]
-    assert pairs(payload["extra_edges"]) == [("app", "tool"), ("lib", "tool")]
+    assert sorted(pairs(payload["edges"])) == [("app", "lib"), ("tool", "lib")]
+    assert sorted(pairs(payload["extra_edges"])) == [("app", "tool"), ("lib", "tool")]
 
 
 def test_one_unconditional_declaration_makes_a_runtime_edge() -> None:
@@ -101,8 +99,8 @@ def test_one_unconditional_declaration_makes_a_runtime_edge() -> None:
         [("app", "lib", True), ("app", "lib", False), ("tool", "lib", True)]
     )
     payload = graph.build_graph(con, snapshot_id, min_dependents=0)
-    assert len(payload["edges"]) == 4
-    assert payload["extra_edges"] == []
+    assert len(graph.decode_edges(payload["edges"])) == 2
+    assert graph.decode_edges(payload["extra_edges"]) == []
 
 
 def test_edges_are_index_pairs_from_dependent_to_dependency(
@@ -112,7 +110,7 @@ def test_edges_are_index_pairs_from_dependent_to_dependency(
     con, snapshot_id = con_and_snapshot
     payload = graph.build_graph(con, snapshot_id, min_dependents=1)
     names = payload["names"]
-    pairs = list(zip(payload["edges"][::2], payload["edges"][1::2], strict=True))
+    pairs = graph.decode_edges(payload["edges"])
     assert [(names[a], names[b]) for a, b in pairs] == [("requests", "urllib3")]
 
 
@@ -122,7 +120,7 @@ def test_the_minimum_drops_nodes_and_their_edges(
     con, snapshot_id = con_and_snapshot
     payload = graph.build_graph(con, snapshot_id, min_dependents=2)
     assert payload["names"] == ["requests"]
-    assert payload["edges"] == []
+    assert payload["edges"] == {"degree": [0], "gaps": []}
     assert payload["min_dependents"] == 2
 
 
@@ -275,3 +273,11 @@ def test_a_project_new_this_month_starts_beside_its_neighbors() -> None:
     for x, y in family:
         assert math.hypot(x - center, y - center) <= 0.43 * graph.EXTENT
     assert positions[0][0] > center, "the one known member keeps its side"
+
+
+def test_edges_encode_as_degrees_and_gaps_and_decode_back() -> None:
+    """Node 0 depends on 5 and 2, node 2 on 7: sorted targets, gaps from zero."""
+    pairs = [(0, 5), (2, 7), (0, 2)]
+    encoded = graph.encode_edges(pairs, 8)
+    assert encoded == {"degree": [2, 0, 1, 0, 0, 0, 0, 0], "gaps": [2, 3, 7]}
+    assert graph.decode_edges(encoded) == [(0, 2), (0, 5), (2, 7)]

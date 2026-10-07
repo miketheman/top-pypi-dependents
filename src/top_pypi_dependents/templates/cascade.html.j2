@@ -479,11 +479,24 @@
     byName = new Map(names.map((n, i) => [n, i]));
     pos = new Float32Array(count * 2);
     for (let i = 0; i < count; i++) { pos[2 * i] = graph.x[i]; pos[2 * i + 1] = graph.y[i]; }
-    const runtime = graph.edges.length / 2;
-    edgeCount = runtime + graph.extra_edges.length / 2;
+    // Each edge list arrives as per-node out-degrees and the gaps between that
+    // node's sorted targets; expanded here into dependent/dependency pairs.
+    const runtime = graph.edges.gaps.length;
+    edgeCount = runtime + graph.extra_edges.gaps.length;
     pairs = new Uint32Array(edgeCount * 2);
-    pairs.set(graph.edges);
-    pairs.set(graph.extra_edges, graph.edges.length);
+    let k = 0;
+    for (const { degree, gaps } of [graph.edges, graph.extra_edges]) {
+      let g = 0;
+      for (let i = 0; i < degree.length; i++) {
+        let target = 0;
+        for (let d = 0; d < degree[i]; d++) {
+          target += gaps[g++];
+          pairs[2 * k] = i;
+          pairs[2 * k + 1] = target;
+          k++;
+        }
+      }
+    }
     // A runtime edge touching a project ranked only with extras is hidden
     // with that project.
     kind = new Uint8Array(edgeCount);

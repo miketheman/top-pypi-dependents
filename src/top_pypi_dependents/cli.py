@@ -165,8 +165,8 @@ def _graph(args: argparse.Namespace) -> int:
         con.close()
         graph.write_graph(payload, out)
         outcome["nodes"] = len(payload["names"])
-        outcome["edges"] = len(payload["edges"]) // 2
-        outcome["extra_edges"] = len(payload["extra_edges"]) // 2
+        outcome["edges"] = len(payload["edges"]["gaps"])
+        outcome["extra_edges"] = len(payload["extra_edges"]["gaps"])
         outcome["bytes"] = out.stat().st_size
         outcome["seeded"] = previous is not None
     return 0
