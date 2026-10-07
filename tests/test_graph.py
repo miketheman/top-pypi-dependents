@@ -281,3 +281,63 @@ def test_edges_encode_as_degrees_and_gaps_and_decode_back() -> None:
     encoded = graph.encode_edges(pairs, 8)
     assert encoded == {"degree": [2, 0, 1, 0, 0, 0, 0, 0], "gaps": [2, 3, 7]}
     assert graph.decode_edges(encoded) == [(0, 2), (0, 5), (2, 7)]
+
+
+def test_dense_neighborhoods_become_named_clouds() -> None:
+    """A tight odoo family and a tight scientific stack, far apart."""
+    names = [f"odoo14-addon-{i}" for i in range(80)] + ["numpy"]
+    names += [f"sci-{i}" for i in range(79)]
+    positions = [(2000 + i % 9 * 10, 2000 + i // 9 * 10) for i in range(80)]
+    positions += [(7000 + i % 9 * 10, 7000 + i // 9 * 10) for i in range(80)]
+    sky = graph.clouds(names, positions, ranked=len(names))
+    named = {cloud["name"] for cloud in sky["clouds"]}
+    assert named == {"the Oort Cloud", "the Numeric Nebula"}
+    assert len(sky["density"]) == graph.CLOUD_GRID**2
+    assert max(sky["density"]) == 255
+
+
+def test_a_cloud_with_no_signature_is_named_for_its_best_known_project() -> None:
+    names = [f"widget-{i:03d}" for i in range(80)]
+    positions = [(5000 + i % 9 * 10, 5000 + i // 9 * 10) for i in range(80)]
+    sky = graph.clouds(names, positions, ranked=len(names))
+    assert [cloud["name"] for cloud in sky["clouds"]] == ["the widget-000 cloud"]
+
+
+def test_a_sparse_sky_has_no_clouds() -> None:
+    sky = graph.clouds(["a", "b"], [(100, 100), (9000, 9000)], ranked=2)
+    assert sky["clouds"] == []
+
+
+def test_the_rim_band_is_named_only_when_occupied() -> None:
+    center = graph.EXTENT // 2
+    inside = graph.clouds(["a"], [(center, center)], ranked=1)
+    rim = graph.clouds(["a"], [(center, center + int(0.48 * graph.EXTENT))], ranked=1)
+    assert inside["belt"] is None
+    assert rim["belt"]["name"] == "the Asteroid Belt"
+
+
+def test_an_empty_sky_has_no_clouds() -> None:
+    sky = graph.clouds([], [], ranked=0)
+    assert sky["clouds"] == []
+    assert sky["belt"] is None
+
+
+def test_a_straggler_is_left_out_of_the_cloud_it_is_far_from() -> None:
+    names = [f"widget-{i:03d}" for i in range(80)] + ["loner"]
+    positions = [(5000 + i % 9 * 10, 5000 + i // 9 * 10) for i in range(80)]
+    positions.append((1000, 1000))
+    sky = graph.clouds(names, positions, ranked=len(names))
+    assert [cloud["projects"] for cloud in sky["clouds"]] == [80]
+
+
+def test_neighboring_clouds_get_different_tints() -> None:
+    """Two crowds close enough to touch must not share a haze color."""
+    names = [f"left-{i:02d}" for i in range(80)] + [f"right-{i:02d}" for i in range(80)]
+    positions = [(4000 + i % 9 * 10, 5000 + i // 9 * 10) for i in range(80)]
+    positions += [(4400 + i % 9 * 10, 5000 + i // 9 * 10) for i in range(80)]
+    sky = graph.clouds(names, positions, ranked=len(names))
+    tints = [cloud["tint"] for cloud in sky["clouds"]]
+    assert len(tints) == 2
+    assert tints[0] != tints[1]
+    assert len(sky["cells"]) == graph.CLOUD_GRID**2
+    assert set(sky["cells"]) == {0, 1, 2}

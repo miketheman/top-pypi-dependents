@@ -202,6 +202,7 @@
       enterkeyhint="go" aria-describedby="find-note">
     <div class="toggles">
       <label class="toggle"><input id="extras" type="checkbox"> Include extras</label>
+      <label class="toggle"><input id="clouds" type="checkbox" checked> Clouds</label>
       <label class="toggle"><input id="animate" type="checkbox"> Animate</label>
       <label class="toggle" id="simulate-toggle" hidden><input id="simulate" type="checkbox"> Simulate releases</label>
     </div>
@@ -259,6 +260,9 @@
   const findNote = $("find-note");
   const simulate = $("simulate");
   const extrasToggle = $("extras");
+  // The haze where projects crowd, and the names the build gave those crowds.
+  const cloudsToggle = $("clouds");
+  const cloudsOn = () => cloudsToggle.checked;
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   // Everything that moves -- a trace's pulses, a release's glow, simulated
   // releases -- answers to this one switch. Off leaves the trace drawn still:
@@ -294,6 +298,15 @@
     };
     colors = { paper: rgb("--paper"), ink: rgb("--ink"), muted: rgb("--ink-muted"), accent: rgb("--accent") };
     colors.font = style.getPropertyValue("--sans");
+    colors.serif = style.getPropertyValue("--serif");
+    // Nebula tints for the cloud haze only: dusty, low in chroma, and kept away
+    // from green, which on this page means a trace. Paler on the dark sheet so
+    // they read as glow rather than stain.
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    colors.nebula = (dark
+      ? ["#b3a3e0", "#93b3db", "#e0a3b2", "#dcbb7a", "#df9e83", "#c9a8e3"]
+      : ["#7d6ba8", "#5e7fa8", "#b06f7f", "#b08a45", "#b0694f", "#9a78b5"]
+    ).map((hex) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255));
   }
   readColors();
   const css = (c, a = 1) => `rgba(${c.map((v) => Math.round(v * 255)).join()},${a})`;
@@ -404,6 +417,28 @@
 
   // Copies the cached still graph to the screen: one triangle covering the
   // viewport, sampling the resolved texture pixel for pixel.
+  // The clouds: one quad over the whole layout, sampling the build's density
+  // grid with smooth filtering, so the haze has soft edges at any zoom. Faint
+  // ink, never the accent, which belongs to a trace.
+  const cloudProgram = compile(`#version 300 es
+    ${VIEW}
+    uniform float u_extent;
+    out vec2 v_uv;
+    void main() {
+      vec2 corner = vec2(gl_VertexID % 2 == 1 ? 1.0 : 0.0, gl_VertexID >= 2 ? 1.0 : 0.0);
+      v_uv = corner;
+      gl_Position = vec4(corner * u_extent * u_scale + u_offset, 0.0, 1.0);
+    }`, `#version 300 es
+    precision highp float;
+    uniform sampler2D u_density; uniform sampler2D u_tints; uniform float u_focusing;
+    in vec2 v_uv; out vec4 color;
+    void main() {
+      float d = texture(u_density, v_uv).r;
+      vec4 tint = texture(u_tints, v_uv);
+      float a = smoothstep(0.2, 0.8, d) * tint.a * (u_focusing > 0.5 ? 0.15 : 0.6);
+      color = vec4(tint.rgb * a, a);
+    }`);
+
   const copyProgram = compile(`#version 300 es
     void main() {
       vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
@@ -430,6 +465,7 @@
   const nodeLoc = loc(nodeProgram, [...VIEW_NAMES, "u_px", "u_grow", "u_pass", "u_base", "u_hot", "u_ink", "a_pos", "a_size", "a_heat", "a_focus"]);
   const edgeLoc = loc(edgeProgram, [...VIEW_NAMES, "u_extras", "u_pass", "u_ink", "u_hot", "u_alpha", "u_time", "u_traceAlpha", "a_pos", "a_end", "a_focus", "a_kind"]);
   const sparkLoc = loc(sparkProgram, [...VIEW_NAMES, "u_hot", "a_pos", "a_alpha"]);
+  const cloudLoc = loc(cloudProgram, [...VIEW_NAMES, "u_extent", "u_density", "u_tints"]);
 
   // Graph data. Nodes are in runtime rank order; the first `ranked` clear the
   // minimum on runtime dependents, the rest only once extras count. `pairs`
@@ -563,7 +599,58 @@
     buffers.kinds = buffer(kinds);
     buffers.edgeFocus = buffer(edgeFocus, gl.DYNAMIC_DRAW);
     buffers.spark = gl.createBuffer();
+    if (graph.sky) {
+      buffers.sky = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, buffers.sky);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, graph.sky.grid, graph.sky.grid, 0, gl.RED, gl.UNSIGNED_BYTE,
+        Uint8Array.from(graph.sky.density));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      buffers.skyTints = gl.createTexture();
+      paintSky();
+    }
     buffers.sparkAlpha = gl.createBuffer();
+  }
+
+  // Each cell of the cloud grid in its cloud's tint, and the rest in plain
+  // muted ink; smooth filtering blends the seams. Repainted with the theme.
+  function paintSky() {
+    if (!buffers.skyTints) return;
+    const { grid: size, clouds: named } = graph.sky;
+    // A cloud's cells are only its densest core; its tint spreads a few cells
+    // further, into the haze around it, so the color reads as the cloud's.
+    let cells = Int16Array.from(graph.sky.cells);
+    for (let pass = 0; pass < 4; pass++) {
+      const next = cells.slice();
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (cells[y * size + x]) continue;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < size && ny < size && cells[ny * size + nx]) {
+              next[y * size + x] = cells[ny * size + nx];
+              break;
+            }
+          }
+        }
+      }
+      cells = next;
+    }
+    const rgba = new Uint8Array(size * size * 4);
+    cells.forEach((cloud, n) => {
+      // Plain haze is fainter than a named cloud's, so the clouds stand out.
+      const rgb = cloud ? colors.nebula[named[cloud - 1].tint % colors.nebula.length] : colors.muted;
+      rgba.set([...rgb.map((v) => Math.round(v * 255)), cloud ? 255 : 110], n * 4);
+    });
+    gl.bindTexture(gl.TEXTURE_2D, buffers.skyTints);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
   // Camera: `k` is CSS pixels per data unit, (cx, cy) the data point at center.
@@ -814,6 +901,7 @@
       return true;
     };
     if (selected >= 0) place(selected, true);
+    if (cloudsOn() && graph.sky && !trace) nameClouds(taken);
     // Names in rank order, fewer when zoomed out: a dozen recognizable names
     // read as a map, fifty crowded ones read as noise. While tracing, only
     // projects on the trace are named.
@@ -825,6 +913,40 @@
       const i = order ? order[n] : n;
       if (i !== selected && visible(i) && place(i, false)) shown++;
     }
+  }
+
+  // Cloud names, at the overview: italic serif, quieter than any project, and
+  // gone by the time the reader has zoomed in far enough to read the projects
+  // themselves. Placed first, so project names make room for them.
+  function nameClouds(taken) {
+    const fade = Math.min(1, Math.max(0, 2 - zoomGrowth()));
+    if (!fade) return;
+    const largest = graph.sky.clouds.length ? graph.sky.clouds[0].projects : 1;
+    ctx.save();
+    ctx.textAlign = "center";
+    // Clouds arrive largest first, so where two names would collide the
+    // smaller cloud gives way.
+    const clear = (x, y, w) => !taken.some((r) => x < r[0] + r[2] + 8 && x + w + 8 > r[0] && Math.abs(y - r[1]) < 20);
+    const label = (text, x, y, px) => {
+      const [sx, sy] = toScreen(x, y);
+      if (sx < 0 || sy < 0 || sx > width || sy > height) return;
+      ctx.font = `italic 400 ${px}px ${colors.serif}`;
+      const w = ctx.measureText(text).width;
+      if (!clear(sx - w / 2, sy, w)) return;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = css(colors.paper, 0.8 * fade);
+      ctx.strokeText(text, sx, sy);
+      ctx.fillStyle = css(colors.muted, fade);
+      ctx.fillText(text, sx, sy);
+      taken.push([sx - w / 2, sy, w]);
+    };
+    for (const cloud of graph.sky.clouds) {
+      label(cloud.name, cloud.x, cloud.y, Math.round(13 + 5 * Math.sqrt(cloud.projects / largest)));
+    }
+    if (graph.sky.belt) {
+      label(graph.sky.belt.name, graph.extent / 2, graph.extent / 2 - graph.sky.belt.radius, 14);
+    }
+    ctx.restore();
   }
 
   // The navigator: every visible dot, drawn once into a cached image whenever
@@ -917,6 +1039,19 @@
       gl.clearColor(...colors.paper, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       drawEdges(0, now);
+      // Over the edges and under the dots: the haze veils the lines the way a
+      // nebula does, and never hides a project.
+      if (cloudsOn() && buffers.sky) {
+        useProgram(cloudProgram, cloudLoc);
+        gl.uniform1f(cloudLoc.u_extent, graph.extent);
+        gl.uniform1i(cloudLoc.u_density, 0);
+        gl.uniform1i(cloudLoc.u_tints, 1);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, buffers.skyTints);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, buffers.sky);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
       gl.enable(gl.DEPTH_TEST);
       drawNodes(0);
       gl.disable(gl.DEPTH_TEST);
@@ -1238,6 +1373,7 @@
     dirty = true;
   }
   animate.addEventListener("change", syncMotion);
+  cloudsToggle.addEventListener("change", () => { dirty = true; });
   // A background tab stops drawing but would keep queueing releases, and pay
   // for all of them on return.
   document.addEventListener("visibilitychange", () => {
@@ -1246,6 +1382,7 @@
 
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     readColors();
+    if (graph) paintSky();
     renderMinimapBase();
   });
   new ResizeObserver(resize).observe(surface);

@@ -538,3 +538,11 @@ def test_simulated_releases_are_hidden_unless_asked_for(
     html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
     assert '<label class="toggle" id="simulate-toggle" hidden>' in html
     assert 'has("simulate")' in html
+
+
+def test_clouds_can_be_switched_off(tmp_path: Path, payload: dict) -> None:
+    render.render_site(
+        payload, tmp_path / "site", rows=2, graph=_graph_file(tmp_path, payload)
+    )
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert '<input id="clouds" type="checkbox" checked> Clouds' in html

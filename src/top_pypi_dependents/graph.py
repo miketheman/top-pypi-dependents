@@ -243,7 +243,7 @@ def layout(
     }
 
     center = EXTENT / 2
-    core, inner, outer = 0.42 * EXTENT, 0.45 * EXTENT, 0.5 * EXTENT
+    core, inner, outer = 0.42 * EXTENT, BELT_INNER * EXTENT, 0.5 * EXTENT
     positions = [(center, center)] * count
     if placed:
         cx = sum(x for x, _ in placed.values()) / len(placed)
@@ -280,6 +280,233 @@ def layout(
             center + r * math.sin(k * golden),
         )
     return [(round(x), round(y)) for x, y in positions]
+
+
+# Where the rim band of unpulled projects starts, as a share of the extent.
+BELT_INNER = 0.45
+
+# The sky is divided into this many cells a side to find where projects crowd.
+CLOUD_GRID = 128
+# A cloud is a connected run of cells denser than this share of occupied ones.
+# Measured on October 2026: lower and the whole core is one cloud; higher and
+# Django and Flask fade out of it.
+CLOUD_PERCENTILE = 0.96
+# Fewer members than this and a dense patch is a clump, not worth a name.
+MIN_CLOUD = 60
+# A family is a cloud's namesake when it holds at least this share of members.
+FAMILY_SHARE = 0.4
+
+# Names for the neighborhoods the layout forms, matched by a family that
+# dominates the cloud or by a project it contains. First match wins, each name
+# is used once, and the largest cloud claims a name first. A cloud nothing
+# matches is named for its best-known project.
+_CLOUD_NAMES: tuple[tuple[str, str, str], ...] = (
+    ("family", "odoo", "the Oort Cloud"),
+    ("family", "pyobjc", "Cocoa Moon"),
+    ("family", "adafruit", "the Blinka Belt"),
+    ("family", "types", "the Shadow Moons"),
+    ("family", "alibabacloud", "the Tea Garden"),
+    ("family", "ros", "the Robot Rings"),
+    ("family", "tree", "the Sapling Belt"),
+    ("family", "aws", "Cloud Formation"),
+    ("family", "azure", "Azure Sky"),
+    ("family", "opentelemetry", "the Telescope Array"),
+    ("family", "qiskit", "the Quantum Foam"),
+    ("family", "plone", "Planet Plone"),
+    ("family", "zope", "the Pyramids"),
+    ("family", "textual", "Terminal Velocity"),
+    ("project", "streamlit", "the Stellar Stream"),
+    ("project", "jupyterlab", "Jupiter"),
+    ("project", "django", "the Pony Nebula"),
+    ("project", "flask", "the Flask Nebula"),
+    ("project", "numpy", "the Numeric Nebula"),
+    ("project", "transformers", "the Tensor Nebula"),
+    ("project", "mcp", "the Agent Nebula"),
+    ("project", "astropy", "the Star Charts"),
+    ("project", "xarray", "the Star Charts"),
+    ("project", "requests", "the Galactic Core"),
+    ("project", "build", "the Tool Belt"),
+    ("project", "plone-api", "Planet Plone"),
+    ("project", "google-auth", "the Googleplex"),
+    ("project", "werkzeug", "the Pallets Pleiades"),
+    ("project", "mkdocs", "the Markdown Moons"),
+    ("project", "pyqt5", "the Qt Quasar"),
+    ("project", "docutils", "the Sphinx"),
+    ("project", "pydantic-ai", "the Small Magellanic Cloud"),
+)
+# The band around the rim, where projects with nothing to be pulled toward sit.
+BELT_NAME = "the Asteroid Belt"
+# How many haze tints the page carries. Clouds closer than ``TINT_REACH`` cells
+# never share one, so two neighbors read as two clouds rather than one.
+TINTS = 6
+TINT_REACH = 4
+
+
+def _tints(regions: list[set[tuple[int, int]]]) -> list[int]:
+    """A tint per region, in rotation, skipping any a near neighbor took.
+
+    Rotation alone spreads the palette across the sky; the neighbor check is
+    what keeps two touching clouds from reading as one.
+    """
+    reach = range(-TINT_REACH, TINT_REACH + 1)
+    halos = [
+        {(x + dx, y + dy) for x, y in cells for dx in reach for dy in reach}
+        for cells in regions
+    ]
+    tints: list[int] = []
+    for i in range(len(regions)):
+        taken = {tints[j] for j in range(i) if halos[i] & regions[j]}
+        order = [(i + step) % TINTS for step in range(TINTS)]
+        tints.append(next((t for t in order if t not in taken), i % TINTS))
+    return tints
+
+
+def _blur(grid: list[list[float]]) -> list[list[float]]:
+    """A separable Gaussian blur, two cells wide, clamped at the edges."""
+    size = len(grid)
+    kernel = [math.exp(-(d * d) / 4.5) for d in range(-4, 5)]
+    total = sum(kernel)
+    kernel = [k / total for k in kernel]
+
+    def clamp(i: int) -> int:
+        return min(size - 1, max(0, i))
+
+    rows = [
+        [
+            sum(row[clamp(x + d - 4)] * k for d, k in enumerate(kernel))
+            for x in range(size)
+        ]
+        for row in grid
+    ]
+    return [
+        [
+            sum(rows[clamp(y + d - 4)][x] * k for d, k in enumerate(kernel))
+            for x in range(size)
+        ]
+        for y in range(size)
+    ]
+
+
+def _cloud_name(members: list[str], used: set[str]) -> str:
+    families: dict[str, int] = {}
+    for name in members:
+        prefix = family(name)
+        if prefix is not None:
+            families[prefix] = families.get(prefix, 0) + 1
+    present = set(members)
+    for kind, key, label in _CLOUD_NAMES:
+        if label in used:
+            continue
+        if kind == "family" and families.get(key, 0) >= FAMILY_SHARE * len(members):
+            return label
+        if kind == "project" and key in present:
+            return label
+    return f"the {members[0]} cloud"
+
+
+def _cell(position: tuple[int, int]) -> tuple[int, int]:
+    x, y = position
+    return (
+        min(CLOUD_GRID - 1, x * CLOUD_GRID // EXTENT),
+        min(CLOUD_GRID - 1, y * CLOUD_GRID // EXTENT),
+    )
+
+
+def _regions(density: list[list[float]]) -> dict[tuple[int, int], int]:
+    """Label each connected run of cells denser than ``CLOUD_PERCENTILE``."""
+    size = len(density)
+    occupied = sorted(v for row in density for v in row if v > 0)
+    if not occupied:
+        return {}
+    threshold = occupied[int(len(occupied) * CLOUD_PERCENTILE)]
+    dense = {
+        (x, y) for y in range(size) for x in range(size) if density[y][x] >= threshold
+    }
+    region: dict[tuple[int, int], int] = {}
+    for start in sorted(dense, key=lambda c: (c[1], c[0])):
+        if start in region:
+            continue
+        label = len(set(region.values()))
+        stack = [start]
+        region[start] = label
+        while stack:
+            cx, cy = stack.pop()
+            for near in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                if near in dense and near not in region:
+                    region[near] = label
+                    stack.append(near)
+    return region
+
+
+def clouds(
+    names: list[str], positions: list[tuple[int, int]], *, ranked: int
+) -> dict[str, Any]:
+    """Where the runtime-ranked projects crowd together, and what to call it.
+
+    ``density`` is the crowding on a ``CLOUD_GRID``-square grid, row by row,
+    scaled to 0..255 on a log curve so the core does not wash out everything
+    else; the page draws it as haze. ``clouds`` names each dense neighborhood,
+    anchored at its members' centroid.
+    """
+    counts = [[0.0] * CLOUD_GRID for _ in range(CLOUD_GRID)]
+    for i in range(ranked):
+        cx, cy = _cell(positions[i])
+        counts[cy][cx] += 1.0
+    density = _blur(counts)
+    peak = max(max(row) for row in density) or 1.0
+    scaled = [
+        round(255 * math.log1p(v) / math.log1p(peak)) for row in density for v in row
+    ]
+
+    region = _regions(density)
+    members: dict[int, list[int]] = {}
+    for i in range(ranked):
+        label = region.get(_cell(positions[i]))
+        if label is not None:
+            members.setdefault(label, []).append(i)
+    found = []
+    labels = []
+    used: set[str] = set()
+    for label, group in sorted(members.items(), key=lambda m: (-len(m[1]), m[1][0])):
+        if len(group) < MIN_CLOUD:
+            continue
+        name = _cloud_name([names[i] for i in group], used)
+        used.add(name)
+        labels.append(label)
+        found.append(
+            {
+                "name": name,
+                "x": round(sum(positions[i][0] for i in group) / len(group)),
+                "y": round(sum(positions[i][1] for i in group) / len(group)),
+                "projects": len(group),
+            }
+        )
+    # Which named cloud each cell belongs to, counted from one; zero is none.
+    # The page tints the haze by it.
+    index = {label: n + 1 for n, label in enumerate(labels)}
+    cells = [
+        index.get(region.get((x, y), -1), 0)
+        for y in range(CLOUD_GRID)
+        for x in range(CLOUD_GRID)
+    ]
+    shapes = [
+        {c for c, label in region.items() if label == wanted} for wanted in labels
+    ]
+    for cloud, tint in zip(found, _tints(shapes), strict=True):
+        cloud["tint"] = tint
+
+    # The rim band is placed, not found, so it is named only when occupied.
+    center = EXTENT / 2
+    belt = any(
+        math.hypot(x - center, y - center) > BELT_INNER * EXTENT for x, y in positions
+    )
+    return {
+        "grid": CLOUD_GRID,
+        "density": scaled,
+        "clouds": found,
+        "cells": cells,
+        "belt": {"name": BELT_NAME, "radius": round(0.475 * EXTENT)} if belt else None,
+    }
 
 
 def encode_edges(pairs: list[tuple[int, int]], count: int) -> dict[str, list[int]]:
@@ -359,17 +586,19 @@ def build_graph(
         else None
     )
     positions = layout(names, edges, extra_edges, last)
+    ranked = sum(1 for _, runtime, _ in nodes if runtime >= min_dependents)
 
     return {
         "generated_at": snapshot.captured_at.isoformat(),
         "min_dependents": min_dependents,
         "extent": EXTENT,
-        "ranked": sum(1 for _, runtime, _ in nodes if runtime >= min_dependents),
+        "ranked": ranked,
         "names": names,
         "dependents": [int(runtime) for _, runtime, _ in nodes],
         "dependents_all": [int(every) for _, _, every in nodes],
         "x": [x for x, _ in positions],
         "y": [y for _, y in positions],
+        "sky": clouds(names, positions, ranked=ranked),
         "edges": encode_edges(edges, len(names)),
         "extra_edges": encode_edges(extra_edges, len(names)),
     }
