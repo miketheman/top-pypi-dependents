@@ -373,7 +373,10 @@ WITH live_edges AS (
     FROM dependencies AS d
     JOIN projects AS dep
         ON dep.snapshot_id = d.snapshot_id AND dep.canonical_name = d.dependent
-    WHERE d.snapshot_id = ? AND dep.is_live
+    -- A project is never its own dependent. `foo[all]` requiring `foo[x]` is
+    -- how extras compose, and 7,908 live projects did it in October 2026; left
+    -- in, each counted itself.
+    WHERE d.snapshot_id = ? AND dep.is_live AND d.dependent <> d.dependency
 ),
 counted AS (
     SELECT

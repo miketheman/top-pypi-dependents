@@ -161,6 +161,29 @@ def test_runtime_and_all_counts_differ_for_an_extras_only_target(
     assert row == (0, 1)
 
 
+def test_a_project_is_not_its_own_dependent(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    """`foo[all]` requiring `foo[x]` is a self-reference, not a dependent.
+
+    7,908 live projects declared one in October 2026, each counting itself.
+    """
+    con, snapshot_id = con_and_snapshot
+    query = (
+        "SELECT dependents_runtime, dependents_all FROM rankings "
+        "WHERE snapshot_id = ? AND canonical_name = 'requests'"
+    )
+    before = con.execute(query, [snapshot_id]).fetchone()
+    con.execute(
+        "INSERT INTO dependencies VALUES "
+        "(?, 'requests', 'requests', 'requests[socks]', NULL, 'all', NULL, false), "
+        "(?, 'requests', 'requests', 'requests', NULL, NULL, NULL, true)",
+        [snapshot_id, snapshot_id],
+    )
+    warehouse.compute_rankings(con, snapshot_id)
+    assert con.execute(query, [snapshot_id]).fetchone() == before
+
+
 def test_non_pypi_targets_are_stored_but_not_ranked(
     con_and_snapshot: ConAndSnapshot,
 ) -> None:

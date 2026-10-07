@@ -27,6 +27,8 @@ full dependency graph &mdash; every declared edge, not just the ranked totals.</
       <code>zope-interface</code> are one project.</li>
   <li>Only projects still live on PyPI are ranked, and only live projects count as
       dependents.</li>
+  <li>No project counts as its own dependent. <code>foo[all]</code> requiring
+      <code>foo[x]</code> is how extras compose, not a dependency.</li>
 </ul>
 
 <h2>Known limitations</h2>
