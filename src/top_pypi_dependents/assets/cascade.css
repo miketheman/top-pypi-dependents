@@ -257,9 +257,6 @@ button.icon {
   display: inline-grid;
   place-items: center;
   padding: 0;
-  font: inherit;
-  font-size: 1.125rem;
-  line-height: 1;
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--ink-subtle);
@@ -269,6 +266,15 @@ button.icon {
 }
 button.icon:hover {
   border-color: var(--ink);
+}
+.icon svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .key {

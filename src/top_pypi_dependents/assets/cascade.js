@@ -1199,7 +1199,11 @@ import { adjacency, bounds, cellIndex, cloudAt, cloudBounds, decodeEdges, reach,
     }
     const link = pypiLink(names[i]);
     link.id = "detail-name";
-    const close = el("button", { type: "button", className: "icon", textContent: "×" });
+    const close = el("button", {
+      type: "button",
+      className: "icon",
+      innerHTML: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 3l8 8M11 3l-8 8"/></svg>',
+    });
     close.setAttribute("aria-label", "Clear the selection");
     // Closing removes the panel and this button; focus returns to the graph.
     close.addEventListener("click", () => {
