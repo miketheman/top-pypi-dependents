@@ -70,12 +70,12 @@ method statement without doing the same work.
 
 ## Capabilities and Constraints
 
-- Four independently runnable stages: `extract` (the only one touching
-  BigQuery), `build`, `artifacts`, `render`. Everything but `extract` runs from
-  a plain checkout with no credentials.
+- Five independently runnable stages: `extract` (the only one touching
+  BigQuery), `build`, `artifacts`, `graph`, `render`. Everything but `extract`
+  runs from a plain checkout with no credentials.
 - The site is fully static and **self-contained**: no external font, script, or
-  asset fetches; its stylesheets and scripts are served beside the pages. It is rendered from Jinja templates at publish time and served
-  as flat files.
+  asset fetches; its stylesheets and scripts are served beside the pages. It is
+  rendered from Jinja templates at publish time and served as flat files.
 - The rankings page lists a slice of the ranking, all of it visible. Search
   looks past the page, answering from a published index of every ranked project —
   a project you can name should be findable whether or not it was rendered.
@@ -86,8 +86,15 @@ method statement without doing the same work.
   ranked number), *incl. extras* / `dependents_all`, *edge*, *snapshot*,
   *live project*.
 - Not published to PyPI. Repo-only tooling.
+- The cascade page draws every project with at least two dependents, laid out
+  so related projects sit together, and is for two things: seeing the
+  ecosystem's shape, and tracing one project's reach -- everything a release
+  of it touches, and everything it rests on. Its layout starts each month from
+  the last, so a returning reader finds numpy where they left it. Named clouds
+  mark the dense neighborhoods, each with a line saying what lives there.
 - Undecided: whether the ranking ever gains per-project detail pages, and
-  whether graph visualization belongs on the site at all.
+  whether the cascade page shows real releases as they happen (see
+  `prd-dependency-cascade.md`).
 
 ## Brand Commitments
 
@@ -146,3 +153,8 @@ already established in the shipped site, which future work must preserve:
 - Full keyboard operability with a visible focus ring in the accent color.
 - Light and dark are both first-class, driven by `prefers-color-scheme`;
   `prefers-reduced-motion` zeroes all transition durations.
+- The cascade page is operable without a pointer: arrow keys pan, plus and minus
+  zoom, and the search selects and frames a project. A selection is announced
+  through the page's polite status region, keyboard focus survives the panel
+  being rebuilt, and everything that moves answers to one Animate switch, off
+  by default for readers who ask their system for less motion.
