@@ -1,32 +1,14 @@
 import json
-from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
-import pytest
 
-from top_pypi_dependents import artifacts, warehouse
-from top_pypi_dependents.sources.fixture import FixtureSource
+from top_pypi_dependents import artifacts
 
-FIXTURES = Path(__file__).parent / "fixtures"
-# The fixture corpus is far below the production plausibility floors.
-FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ConAndSnapshot = tuple[duckdb.DuckDBPyConnection, int]
-
-
-@pytest.fixture
-def con_and_snapshot() -> ConAndSnapshot:
-    con = warehouse.connect(None)
-    warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
-        con,
-        source=FixtureSource(FIXTURES),
-        captured_at=datetime(2026, 9, 1, tzinfo=UTC),
-        floors=FLOORS,
-    ).snapshot_id
-    warehouse.compute_rankings(con, snapshot_id)
-    return con, snapshot_id
 
 
 def test_payload_header_fields(con_and_snapshot: ConAndSnapshot) -> None:

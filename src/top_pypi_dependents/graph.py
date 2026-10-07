@@ -1,13 +1,13 @@
 """Emit the ranked dependency graph, laid out, for the cascade page.
 
-Nodes are the ranked projects -- the same set `artifacts` publishes -- and edges
-are the runtime dependencies between them. The full graph stays in the release's
-DuckDB and Parquet; this is the slice a browser can draw.
+Nodes are every project with enough dependents once extras count, those ranked
+on runtime dependents alone first; edges are the dependencies between them,
+with those declared only behind an extra kept apart. The full graph stays in the
+release's DuckDB and Parquet; this is the slice a browser can draw.
 """
 
 from __future__ import annotations
 
-import json
 import math
 import random
 from typing import TYPE_CHECKING, Any
@@ -18,7 +18,6 @@ from top_pypi_dependents import warehouse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from pathlib import Path
 
     import duckdb
 
@@ -86,7 +85,7 @@ def family(name: str) -> str | None:
 def _layout_graph(
     names: list[str],
     edges: list[tuple[int, int]],
-    extra_edges: list[tuple[int, int]],
+    extra_edges: Sequence[tuple[int, int]],
 ) -> tuple[igraph.Graph, list[float]]:
     """The graph the layout runs on, which is not quite the graph drawn.
 
@@ -96,10 +95,10 @@ def _layout_graph(
     knot. Hidden hubs are numbered after the real nodes and dropped afterwards.
     """
     count = len(names)
-    dependents = [0] * count
-    for _, dependency in [*edges, *extra_edges]:
-        dependents[dependency] += 1
     links = [*edges, *extra_edges]
+    dependents = [0] * count
+    for _, dependency in links:
+        dependents[dependency] += 1
     weights = [
         (1.0 if k < len(edges) else EXTRA_WEIGHT) / math.log2(2 + dependents[b])
         for k, (_, b) in enumerate(links)
@@ -122,9 +121,27 @@ def _layout_graph(
     return igraph.Graph(n=hub, edges=links), weights
 
 
+# The core the force layout fills, and the band around it where projects with
+# nothing to be pulled toward sit, as radii in shares of the extent.
+CORE = 0.42
+BELT_INNER = 0.45
+BELT_OUTER = 0.5
+
+
+def _in_belt(x: float, y: float) -> bool:
+    return math.hypot(x - EXTENT / 2, y - EXTENT / 2) > BELT_INNER * EXTENT
+
+
 # DrL's density grid spans a few thousand units around the origin and fails
 # outright on a seed outside it, so last month's map is scaled to this radius.
 SEED_RADIUS = 600.0
+
+
+def _centroid(points: Sequence[tuple[float, float]]) -> tuple[float, float]:
+    return (
+        sum(x for x, _ in points) / len(points),
+        sum(y for _, y in points) / len(points),
+    )
 
 
 def _center_and_radius(
@@ -135,8 +152,7 @@ def _center_and_radius(
     The last half percent are small components DrL flings far out; scaling to
     them would shrink everything else to a speck.
     """
-    cx = sum(x for x, _ in points) / len(points)
-    cy = sum(y for _, y in points) / len(points)
+    cx, cy = _centroid(points)
     distances = sorted(math.hypot(x - cx, y - cy) for x, y in points)
     return cx, cy, distances[int(len(distances) * 0.995)] or 1.0
 
@@ -157,10 +173,8 @@ def align(
     pairs = [(p, t) for p, t in zip(points, targets, strict=True) if t is not None]
     if not pairs:
         return points
-    px = sum(x for (x, _), _ in pairs) / len(pairs)
-    py = sum(y for (_, y), _ in pairs) / len(pairs)
-    tx0 = sum(x for _, (x, _) in pairs) / len(pairs)
-    ty0 = sum(y for _, (_, y) in pairs) / len(pairs)
+    px, py = _centroid([p for p, _ in pairs])
+    tx0, ty0 = _centroid([t for _, t in pairs])
     pairs = [((x - px, y - py), (tx - tx0, ty - ty0)) for (x, y), (tx, ty) in pairs]
     best: tuple[float, float, float] | None = None
     for flip in (1.0, -1.0):
@@ -204,12 +218,7 @@ def seed_positions(
 
     def centroid(v: int) -> tuple[float, float] | None:
         near = [scaled[u] for u in graph.neighbors(v) if u in scaled]
-        if not near:
-            return None
-        return (
-            sum(x for x, _ in near) / len(near),
-            sum(y for _, y in near) / len(near),
-        )
+        return _centroid(near) if near else None
 
     for v in vertices:
         if v >= count and (spot := centroid(v)) is not None:
@@ -240,22 +249,20 @@ def layout(
     count = len(names)
     if count == 0:
         return []
-    graph, weights = _layout_graph(names, edges, list(extra_edges))
+    graph, weights = _layout_graph(names, edges, extra_edges)
     graph.es["weight"] = weights
-    graph.vs["node"] = range(graph.vcount())
-    vertices = [v for v in range(graph.vcount()) if graph.degree(v)]
+    degrees = graph.degree()
+    vertices = [v for v, degree in enumerate(degrees) if degree]
     linked = graph.induced_subgraph(vertices)
     # Last month's rim band is ordered by rank, not by anything structural, so
     # a project that sat there gives no hint where it belongs now.
-    rim = BELT_INNER * EXTENT
     known = {
         i: previous[name]
         for i, name in enumerate(names)
         if previous
         and name in previous
-        and graph.degree(i)
-        and math.hypot(previous[name][0] - EXTENT / 2, previous[name][1] - EXTENT / 2)
-        < rim
+        and degrees[i]
+        and not _in_belt(*previous[name])
     }
 
     # igraph draws from one process-wide generator, so it is seeded for the
@@ -268,12 +275,12 @@ def layout(
         coords = linked.layout_drl(weights="weight", seed=seed)
     finally:
         igraph.set_random_number_generator(random)
-    placed = {
-        node: coords[v] for v, node in enumerate(linked.vs["node"]) if node < count
-    }
+    # The induced subgraph keeps `vertices` in order, so its v-th vertex is
+    # vertices[v].
+    placed = {node: coords[v] for v, node in enumerate(vertices) if node < count}
 
     center = EXTENT / 2
-    core, inner, outer = 0.42 * EXTENT, BELT_INNER * EXTENT, 0.5 * EXTENT
+    core, inner, outer = CORE * EXTENT, BELT_INNER * EXTENT, BELT_OUTER * EXTENT
     positions = [(center, center)] * count
     if placed:
         # The outliers past the radius are pulled onto the core's rim.
@@ -309,9 +316,6 @@ def layout(
         )
     return [(round(x), round(y)) for x, y in positions]
 
-
-# Where the rim band of unpulled projects starts, as a share of the extent.
-BELT_INNER = 0.45
 
 # The sky is divided into this many cells a side to find where projects crowd.
 CLOUD_GRID = 128
@@ -645,10 +649,11 @@ def _regions(density: list[list[float]]) -> dict[tuple[int, int], int]:
         (x, y) for y in range(size) for x in range(size) if density[y][x] >= threshold
     }
     region: dict[tuple[int, int], int] = {}
+    label = -1
     for start in sorted(dense, key=lambda c: (c[1], c[0])):
         if start in region:
             continue
-        label = len(set(region.values()))
+        label += 1
         stack = [start]
         region[start] = label
         while stack:
@@ -663,7 +668,7 @@ def _regions(density: list[list[float]]) -> dict[tuple[int, int], int]:
 def clouds(
     names: list[str], positions: list[tuple[int, int]], *, ranked: int
 ) -> dict[str, Any]:
-    """Where the runtime-ranked projects crowd together, and what to call it.
+    """Where the first ``ranked`` projects crowd together, and what to call it.
 
     ``density`` is the crowding on a ``CLOUD_GRID``-square grid, row by row,
     scaled to 0..255 on a log curve so the core does not wash out everything
@@ -696,11 +701,12 @@ def clouds(
         name, about, top = _cloud_name([names[i] for i in group], used)
         used.add(name)
         labels.append(label)
+        x, y = _centroid([positions[i] for i in group])
         found.append(
             {
                 "name": name,
-                "x": round(sum(positions[i][0] for i in group) / len(group)),
-                "y": round(sum(positions[i][1] for i in group) / len(group)),
+                "x": round(x),
+                "y": round(y),
                 "projects": len(group),
                 "about": about,
                 "top": top,
@@ -720,11 +726,9 @@ def clouds(
     for cloud, tint in zip(found, _tints(shapes), strict=True):
         cloud["tint"] = tint
 
-    # The rim band is placed, not found, so it is named only when occupied.
-    center = EXTENT / 2
-    belt = any(
-        math.hypot(x - center, y - center) > BELT_INNER * EXTENT for x, y in positions
-    )
+    # The rim band is placed, not found, so it is named only when the projects
+    # this sky covers occupy it.
+    belt = any(_in_belt(*positions[i]) for i in range(ranked))
     return {
         "grid": CLOUD_GRID,
         "density": scaled,
@@ -733,7 +737,7 @@ def clouds(
         "belt": {
             "name": BELT_NAME,
             "about": BELT_ABOUT,
-            "radius": round(0.475 * EXTENT),
+            "radius": round((BELT_INNER + BELT_OUTER) / 2 * EXTENT),
         }
         if belt
         else None,
@@ -836,9 +840,3 @@ def build_graph(
         "edges": encode_edges(edges, len(names)),
         "extra_edges": encode_edges(extra_edges, len(names)),
     }
-
-
-def write_graph(graph: dict[str, Any], path: Path) -> None:
-    """Write the graph compactly; it is fetched by every visit to the page."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(graph, separators=(",", ":")) + "\n", encoding="utf-8")

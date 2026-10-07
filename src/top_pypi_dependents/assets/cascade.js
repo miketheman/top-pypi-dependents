@@ -1,5 +1,5 @@
-import { canonical, fmt, plural } from "./format.js";
-import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from "./graph-model.js";
+import { canonical, fetchJson, fmt, plural, pypiLink } from "./format.js";
+import { adjacency, bounds, cellIndex, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from "./graph-model.js";
 
 (() => {
   // Tuning. A hop is one step out along "is depended on by".
@@ -10,6 +10,17 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   const DECAY = 0.72;
   const SIM_EVERY_MS = 2200;
   const LIST_LIMIT = 12;
+  // The most a revealed list builds at once: numpy is depended on by thousands
+  // of drawn projects, and a button for each stalled the panel. The filter
+  // searches all of them.
+  const LIST_MAX = 500;
+  // A trace's pulses: one every PULSE_PX pixels of a line as drawn, at least
+  // one and at most MAX_PULSES to a line, each taking PULSE_MS to travel its
+  // spacing. Read by the edge shader and by the beads that ride the pulses.
+  const PULSE_PX = 140;
+  const MAX_PULSES = 12;
+  const PULSE_MS = 1400;
+  const pulsePhase = (now) => (now / PULSE_MS) % 1;
 
   const $ = (id) => document.getElementById(id);
   const surface = $("surface");
@@ -156,25 +167,27 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   const edgeProgram = compile(
     `#version 300 es
     ${VIEW}
-    uniform float u_extras; uniform float u_pass; uniform float u_k;
+    uniform float u_extras; uniform float u_k;
     in vec2 a_pos; in float a_end; in float a_focus; in float a_kind; in float a_len;
-    out float v_end; out float v_focus; out float v_shown; out float v_pass; out float v_repeat;
+    out float v_end; out float v_focus; out float v_repeat;
     void main() {
       gl_Position = vec4(a_pos * u_scale + u_offset, 0.0, 1.0);
-      v_end = a_end; v_focus = a_focus; v_pass = u_pass;
-      // Pulses every 140 or so pixels of the line as drawn, and at least one:
-      // a fixed one per line crawled as a long smear once zooming stretched a
-      // line past the edges of the view.
-      v_repeat = clamp(floor(a_len * u_k / 140.0), 1.0, 12.0);
-      v_shown = (a_kind > 0.5 && u_extras < 0.5) || (u_pass > 0.5 && a_focus == 0.0) ? 0.0 : 1.0;
+      // An edge only extras draw is moved outside clip space rather than
+      // discarded per fragment: with extras off that is more than half the
+      // lines, and rasterizing them only to throw every pixel away doubled
+      // the work.
+      if (a_kind > 0.5 && u_extras < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      v_end = a_end; v_focus = a_focus;
+      // Pulses spaced by pixels of the line as drawn: a fixed one per line
+      // crawled as a long smear once zooming stretched a line past the view.
+      v_repeat = clamp(floor(a_len * u_k / ${PULSE_PX}.0), 1.0, ${MAX_PULSES}.0);
     }`,
     `#version 300 es
     precision highp float;
     uniform vec3 u_ink; uniform vec3 u_hot; uniform float u_alpha; uniform float u_focusing;
-    uniform float u_time; uniform float u_traceAlpha;
-    in float v_end; in float v_focus; in float v_shown; in float v_pass; in float v_repeat; out vec4 color;
+    uniform float u_time; uniform float u_traceAlpha; uniform float u_pass;
+    in float v_end; in float v_focus; in float v_repeat; out vec4 color;
     void main() {
-      if (v_shown < 0.5) discard;
       float shade = mix(0.1, 1.0, v_end);
       vec3 rgb = u_ink;
       float a = u_alpha * shade;
@@ -187,7 +200,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
           // A pulse runs from the dependency to the dependent: the way a
           // release travels. Upstream lines are dashed by the same pulse.
           float pulse = fract(u_time + v_end * v_repeat);
-          if (v_pass > 0.5) a = smoothstep(0.75, 1.0, pulse) * 0.9;
+          if (u_pass > 0.5) a = smoothstep(0.75, 1.0, pulse) * 0.9;
           else if (v_focus < 0.0) a *= step(0.35, fract(pulse * 3.0));
         }
       }
@@ -195,8 +208,6 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     }`,
   );
 
-  // Copies the cached still graph to the screen: one triangle covering the
-  // viewport, sampling the resolved texture pixel for pixel.
   // The clouds: one quad over the whole layout, sampling the build's density
   // grid with smooth filtering, so the haze has soft edges at any zoom. Faint
   // ink, never the accent, which belongs to a trace.
@@ -222,6 +233,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     }`,
   );
 
+  // Copies the cached still graph to the screen: one triangle covering the
+  // viewport, sampling the resolved texture pixel for pixel.
   const copyProgram = compile(
     `#version 300 es
     void main() {
@@ -311,9 +324,9 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   // minimum on runtime dependents, the rest only once extras count. `pairs`
   // is every edge, runtime first, as dependent/dependency index pairs, and
   // `kind[k]` is 1 for an edge that only exists with extras switched on.
-  let graph, count, ranked, edgeCount, names, pos, pairs, kind, edgeSet, byName, grid, orderAll;
+  let graph, count, ranked, edgeCount, names, pos, pairs, kind, byName, grid, orderAll, nameWidths;
   let down, downStart, up, upStart;
-  let heat, nodeFocus, edgeFocus;
+  let heat, nodeFocus;
   let extras = false;
   const buffers = {};
 
@@ -339,11 +352,13 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       pos[2 * i] = graph.x[i];
       pos[2 * i + 1] = graph.y[i];
     }
-    edgeSet = decodeEdges(graph);
-    ({ pairs, kind, edgeCount } = edgeSet);
+    ({ pairs, kind, edgeCount } = decodeEdges(graph));
+    // Decoded into typed arrays above; the boxed JSON copies are let go.
+    for (const field of ["x", "y", "edges", "extra_edges"]) delete graph[field];
     heat = new Float32Array(count);
+    // Measured once each, on first placement: the label font never changes.
+    nameWidths = new Float32Array(count);
     nodeFocus = new Float32Array(count);
-    edgeFocus = new Float32Array(edgeCount * 2);
     // Label priority with extras on: the count the dots are then sized by,
     // ties broken by name, as the ranking breaks them.
     orderAll = Uint32Array.from({ length: count }, (_, i) => i).sort(
@@ -352,20 +367,22 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
 
     // A coarse grid over data space, for finding the node under the pointer.
     const cells = 128;
-    const cellSize = graph.extent / cells;
     const buckets = Array.from({ length: cells * cells }, () => []);
-    const cellOf = (v) => Math.min(cells - 1, Math.max(0, Math.floor(v / cellSize)));
+    const cellOf = (v) => cellIndex(v, graph.extent, cells);
     for (let i = 0; i < count; i++) buckets[cellOf(pos[2 * i + 1]) * cells + cellOf(pos[2 * i])].push(i);
     grid = { cells, buckets, cellOf };
   }
 
+  const adjacencies = {};
   function setMode(on) {
     extras = on;
-    sky = (extras && graph.extras_sky) || graph.sky;
+    sky = extras ? graph.extras_sky : graph.sky;
     paintSky();
     listClouds();
-    [down, downStart] = adjacency(edgeSet, count, extras, 1, 0);
-    [up, upStart] = adjacency(edgeSet, count, extras, 0, 1);
+    // Built once per mode: switching back and forth reuses them.
+    const edges = { pairs, kind, edgeCount };
+    adjacencies[on] ??= [adjacency(edges, count, on, 1, 0), adjacency(edges, count, on, 0, 1)];
+    [[down, downStart], [up, upStart]] = adjacencies[on];
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.size);
     gl.bufferData(
       gl.ARRAY_BUFFER,
@@ -375,13 +392,28 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     if (selected >= 0 && !visible(selected)) selected = -1;
     select(selected, { quiet: true });
     renderMinimapBase();
-    let lines = 0;
-    for (let k = 0; k < edgeCount; k++) if (extras || !kind[k]) lines++;
     statusLine.textContent =
-      `${fmt(extras ? count : ranked)} projects and ${fmt(lines)} dependencies between them` +
+      `${fmt(extras ? count : ranked)} projects and ${fmt(downStart[count])} dependencies between them` +
       (extras ? ", extras included." : ".");
     dirty = true;
   }
+
+  // One edge's vertices, dependent `a` to dependency `b`, written at `slot`:
+  // both ends' positions, which end is the dependency, and the line's length
+  // for spacing its pulses.
+  function writeEdge(a, b, slot, out) {
+    out.pos[4 * slot] = pos[2 * a];
+    out.pos[4 * slot + 1] = pos[2 * a + 1];
+    out.pos[4 * slot + 2] = pos[2 * b];
+    out.pos[4 * slot + 3] = pos[2 * b + 1];
+    out.ends[2 * slot + 1] = 1;
+    out.lens[2 * slot] = out.lens[2 * slot + 1] = Math.hypot(pos[2 * b] - pos[2 * a], pos[2 * b + 1] - pos[2 * a + 1]);
+  }
+  const edgeArrays = (n) => ({
+    pos: new Float32Array(n * 4),
+    ends: new Float32Array(n * 2),
+    lens: new Float32Array(n * 2),
+  });
 
   function upload() {
     const buffer = (data, usage = gl.STATIC_DRAW) => {
@@ -396,27 +428,25 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     buffers.nodeFocus = buffer(nodeFocus, gl.DYNAMIC_DRAW);
     // Edges are drawn unindexed: each end needs its own `a_end`, which a vertex
     // shared through an index buffer cannot have.
-    const edgePos = new Float32Array(edgeCount * 4);
-    const ends = new Float32Array(edgeCount * 2);
+    const edges = edgeArrays(edgeCount);
     const kinds = new Float32Array(edgeCount * 2);
-    const lens = new Float32Array(edgeCount * 2);
     for (let k = 0; k < edgeCount; k++) {
-      const a = pairs[2 * k],
-        b = pairs[2 * k + 1];
-      edgePos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * k);
-      ends[2 * k + 1] = 1;
+      writeEdge(pairs[2 * k], pairs[2 * k + 1], k, edges);
       kinds[2 * k] = kinds[2 * k + 1] = kind[k];
-      lens[2 * k] = lens[2 * k + 1] = Math.hypot(pos[2 * b] - pos[2 * a], pos[2 * b + 1] - pos[2 * a + 1]);
     }
-    buffers.edgePos = buffer(edgePos);
-    buffers.ends = buffer(ends);
+    buffers.edgePos = buffer(edges.pos);
+    buffers.ends = buffer(edges.ends);
     buffers.kinds = buffer(kinds);
-    buffers.lens = buffer(lens);
-    buffers.edgeFocus = buffer(edgeFocus, gl.DYNAMIC_DRAW);
+    buffers.lens = buffer(edges.lens);
     buffers.spark = gl.createBuffer();
-    if (graph.sky) {
-      buffers.sky = gl.createTexture();
-      buffers.skyTints = gl.createTexture();
+    buffers.sky = gl.createTexture();
+    buffers.skyTints = gl.createTexture();
+    for (const texture of [buffers.sky, buffers.skyTints]) {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
     buffers.sparkAlpha = gl.createBuffer();
     buffers.beads = gl.createBuffer();
@@ -430,33 +460,19 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   // found again over every drawn project.
   let sky = null;
   function paintSky() {
-    if (!buffers.sky || !sky) return;
     const { grid: size, clouds: named } = sky;
     gl.bindTexture(gl.TEXTURE_2D, buffers.sky);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, size, size, 0, gl.RED, gl.UNSIGNED_BYTE, Uint8Array.from(sky.density));
-    for (const [key, value] of [
-      [gl.TEXTURE_MIN_FILTER, gl.LINEAR],
-      [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
-      [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
-      [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE],
-    ]) {
-      gl.texParameteri(gl.TEXTURE_2D, key, value);
-    }
-    const cells = spreadCells(sky.cells, size, 4);
-    skyCells = cells;
+    skyCells = spreadCells(sky.cells, size, 4);
     const rgba = new Uint8Array(size * size * 4);
-    cells.forEach((cloud, n) => {
+    skyCells.forEach((cloud, n) => {
       // Plain haze is fainter than a named cloud's, so the clouds stand out.
       const rgb = cloud ? colors.nebula[named[cloud - 1].tint % colors.nebula.length] : colors.muted;
       rgba.set([...rgb.map((v) => Math.round(v * 255)), cloud ? 255 : 110], n * 4);
     });
     gl.bindTexture(gl.TEXTURE_2D, buffers.skyTints);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
   // Camera: `k` is CSS pixels per data unit, (cx, cy) the data point at center.
@@ -514,7 +530,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     if (!complete || gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      fail("This display is too large for the graph's drawing buffer. A smaller window may work.");
+      fail("This display is too large for the graph's drawing buffer. Reload the page in a smaller window.");
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
@@ -549,7 +565,9 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       const atHome = home && view.k === home.k && view.cx === home.cx && view.cy === home.cy;
       home = homeView();
       if (atHome) Object.assign(view, home);
-      renderMinimapBase();
+      // The navigator's image depends on pixel density, not on the surface's
+      // size, so dragging a window edge does not redraw 57,000 dots per step.
+      if (miniBase?.width !== MINI * miniScale()) renderMinimapBase();
     }
     dirty = true;
   }
@@ -580,82 +598,70 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   let trace = null;
   let traceAlpha = 1;
   let tracedCount = 0,
-    tracedPos,
-    tracedEnds,
-    tracedFocus,
-    tracedLens;
+    tracedEdges,
+    tracedFocus;
   function focus(origin) {
     nodeFocus.fill(0);
-    edgeFocus.fill(0);
     trace = null;
+    tracedCount = 0;
     if (origin < 0) return;
     // The counts are always the whole reach; only what is drawn stops short.
     const downAll = reach(origin, down, downStart);
     const upAll = reach(origin, up, upStart);
-    const near = (depths) => new Map([...depths].filter(([, d]) => d <= hops()));
+    const near = (depths) =>
+      hops() === Number.POSITIVE_INFINITY ? depths : new Map([...depths].filter(([, d]) => d <= hops()));
     const downDepth = near(downAll);
     const upDepth = near(upAll);
     for (const [i, d] of downDepth) nodeFocus[i] = d;
     for (const [i, d] of upDepth) if (d) nodeFocus[i] = -d;
     nodeFocus[origin] = 0.5;
-    let traced = 0;
-    for (let k = 0; k < edgeCount; k++) {
-      if (!extras && kind[k]) continue;
-      const a = pairs[2 * k],
-        b = pairs[2 * k + 1];
-      const da = downDepth.get(a),
-        db = downDepth.get(b);
-      let f = 0;
-      if (da !== undefined && db !== undefined && da === db + 1) f = da;
-      else {
-        const ua = upDepth.get(a),
-          ub = upDepth.get(b);
-        if (ua !== undefined && ub !== undefined && ub === ua + 1) f = -ub;
+    // The traced edges, as dependent, dependency, focus, found by walking the
+    // adjacency from the projects reached rather than scanning every edge. An
+    // edge on a cycle could step both ways; it is drawn as a step down.
+    const traced = [];
+    for (const [b, d] of downDepth) {
+      for (let k = downStart[b]; k < downStart[b + 1]; k++) {
+        if (downDepth.get(down[k]) === d + 1) traced.push(down[k], b, d + 1);
       }
-      edgeFocus[2 * k] = edgeFocus[2 * k + 1] = f;
-      if (f) traced++;
     }
-    // The animated pass draws only these: drawing all 380,000 edges every
-    // frame to discard most of them undid the point of caching the still graph.
-    tracedCount = traced;
-    tracedPos = new Float32Array(traced * 4);
-    tracedEnds = new Float32Array(traced * 2);
-    tracedFocus = new Float32Array(traced * 2);
-    tracedLens = new Float32Array(traced * 2);
-    let t = 0;
-    for (let k = 0; k < edgeCount; k++) {
-      const f = edgeFocus[2 * k];
-      if (!f || (!extras && kind[k])) continue;
-      const a = pairs[2 * k],
-        b = pairs[2 * k + 1];
-      tracedPos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * t);
-      tracedEnds[2 * t + 1] = 1;
-      tracedFocus[2 * t] = tracedFocus[2 * t + 1] = f;
-      tracedLens[2 * t] = tracedLens[2 * t + 1] = Math.hypot(pos[2 * b] - pos[2 * a], pos[2 * b + 1] - pos[2 * a + 1]);
-      t++;
+    for (const [a, d] of upDepth) {
+      for (let k = upStart[a]; k < upStart[a + 1]; k++) {
+        const b = up[k];
+        if (upDepth.get(b) === d + 1 && downDepth.get(a) !== downDepth.get(b) + 1) traced.push(a, b, -(d + 1));
+      }
+    }
+    // Drawn over the dimmed still graph, and alone in the animated pass:
+    // drawing all 380,000 edges every frame to discard most of them undid the
+    // point of caching the still graph.
+    tracedCount = traced.length / 3;
+    tracedEdges = edgeArrays(tracedCount);
+    tracedFocus = new Float32Array(tracedCount * 2);
+    for (let t = 0; t < tracedCount; t++) {
+      writeEdge(traced[3 * t], traced[3 * t + 1], t, tracedEdges);
+      tracedFocus[2 * t] = tracedFocus[2 * t + 1] = traced[3 * t + 2];
     }
     // A few hundred traced lines can each be drawn strong; numpy's ten
     // thousand would be a solid green disc, so they thin as they multiply.
-    traceAlpha = Math.min(1, Math.sqrt(400 / Math.max(traced, 1)));
+    traceAlpha = Math.min(1, Math.sqrt(400 / Math.max(tracedCount, 1)));
     trace = {
       down: downAll.size - 1,
       up: upAll.size - 1,
-      nodes: [...upDepth.keys(), ...downDepth.keys()].sort((a, b) => a - b),
+      // The origin is in both walks, and so is anything on a cycle with it;
+      // each is listed once.
+      nodes: Uint32Array.from(new Set([...upDepth.keys(), ...downDepth.keys()])).sort(),
     };
   }
 
   function uploadFocus() {
     if (!buffers.tracedPos) {
-      for (const name of ["tracedPos", "tracedEnds", "tracedKinds", "tracedFocus", "tracedLens"])
-        buffers[name] = gl.createBuffer();
+      for (const name of ["tracedPos", "tracedEnds", "tracedFocus", "tracedLens"]) buffers[name] = gl.createBuffer();
     }
     if (tracedCount) {
       for (const [name, data] of [
-        ["tracedPos", tracedPos],
-        ["tracedEnds", tracedEnds],
-        ["tracedKinds", new Float32Array(tracedCount * 2)],
+        ["tracedPos", tracedEdges.pos],
+        ["tracedEnds", tracedEdges.ends],
         ["tracedFocus", tracedFocus],
-        ["tracedLens", tracedLens],
+        ["tracedLens", tracedEdges.lens],
       ]) {
         gl.bindBuffer(gl.ARRAY_BUFFER, buffers[name]);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
@@ -663,8 +669,6 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nodeFocus);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeFocus);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.edgeFocus);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeFocus);
   }
 
   // Cascade state for releases: when each lit node lights, and how bright.
@@ -697,7 +701,12 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     return seen.size - 1;
   }
 
+  // Uploaded only while something glows, and once more to clear the last of
+  // it: a selection animates every frame, and most of those light nothing.
+  let heatLive = false;
   function updateHeat(now) {
+    if (!litAt.size && !heatLive) return;
+    heatLive = litAt.size > 0;
     for (const [i, { t, amp }] of litAt) {
       const age = now - t;
       if (age < 0) {
@@ -743,6 +752,33 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     gl.drawArrays(gl.LINES, 0, live.length * 2);
   }
 
+  // Label helpers. Every name on the graph is drawn over a paper halo, so it
+  // reads across lines and haze; `taken` holds the boxes already placed, as
+  // [left, middle, width], and a label that would crowd one is not drawn.
+  const onScreen = (sx, sy) => sx >= 0 && sy >= 0 && sx <= width && sy <= height;
+  const clears = (taken, x, y, w, pad, rows) =>
+    !taken.some((r) => x < r[0] + r[2] + pad && x + w + pad > r[0] && Math.abs(y - r[1]) < rows);
+  function halo(text, x, y, lineWidth, ink, paper) {
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = paper;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = ink;
+    ctx.fillText(text, x, y);
+  }
+  // A centered serif name, as clouds and the belt are labeled; returns the box
+  // to record in `taken`, or nothing when `room` says it would crowd one.
+  function serifName(text, sx, sy, px, lineWidth, ink, paper, room) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = `italic 400 ${px}px ${colors.serif}`;
+    const w = ctx.measureText(text).width;
+    const box = [sx - w / 2, sy, w];
+    const fits = !room || room(...box);
+    if (fits) halo(text, sx, sy, lineWidth, ink, paper);
+    ctx.restore();
+    return fits ? box : null;
+  }
+
   function drawLabels() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
@@ -750,27 +786,25 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
     const taken = [];
-    const fits = (x, y, w) => !taken.some((r) => x < r[0] + r[2] + 6 && x + w + 6 > r[0] && Math.abs(y - r[1]) < 15);
     const place = (i, strong) => {
       const [sx, sy] = toScreen(pos[2 * i], pos[2 * i + 1]);
-      if (sx < 0 || sy < 0 || sx > width || sy > height) return false;
-      const w = ctx.measureText(names[i]).width;
+      if (!onScreen(sx, sy)) return false;
+      nameWidths[i] ||= ctx.measureText(names[i]).width;
+      const w = nameWidths[i];
       // Flipped to the left of the dot near the right edge, so a name is not
       // cut off by the frame it is meant to sit inside.
       const gap = dotPx(i) / 2 + 4;
       const x = sx + gap + w > width - 4 ? sx - gap - w : sx + gap;
-      if (!strong && !fits(x, sy, w)) return false;
+      if (!strong && !clears(taken, x, sy, w, 6, 15)) return false;
       taken.push([x, sy, w]);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = css(colors.paper);
-      ctx.strokeText(names[i], x, sy);
-      ctx.fillStyle = css(strong ? colors.ink : colors.muted);
-      ctx.fillText(names[i], x, sy);
+      halo(names[i], x, sy, 3, css(strong ? colors.ink : colors.muted), css(colors.paper));
       return true;
     };
     if (selected >= 0) place(selected, true);
-    if (cloudsOn() && sky && !trace) {
-      pinCloud();
+    // The cloud names are the map while nothing is traced.
+    const mapping = cloudsOn() && !trace;
+    if (mapping) {
+      pinCloud(taken);
       nameBelt(taken);
       nameClouds(taken);
     }
@@ -782,7 +816,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     let budget = Math.round((12 * zoomGrowth() ** 2 * width * height) / 1e6) + 8;
     // At the overview the cloud names are the map; a handful of the best-known
     // projects is enough beside them, and the rest return as they fade.
-    if (cloudsOn() && sky?.clouds.length && !trace) budget = Math.round(budget * (1 - 0.7 * cloudFade()));
+    if (mapping && sky.clouds.length) budget = Math.round(budget * (1 - 0.7 * cloudFade()));
     let shown = 0;
     for (let n = 0; n < limit && shown < budget; n++) {
       const i = order ? order[n] : n;
@@ -797,29 +831,17 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   function nameClouds(taken) {
     const fade = cloudFade();
     if (!fade) return;
-    const largest = sky.clouds.length ? sky.clouds[0].projects : 1;
-    ctx.save();
-    ctx.textAlign = "center";
+    const largest = sky.clouds[0]?.projects;
     // Clouds arrive largest first, so where two names would collide the
     // smaller cloud gives way.
-    const clear = (x, y, w) => !taken.some((r) => x < r[0] + r[2] + 8 && x + w + 8 > r[0] && Math.abs(y - r[1]) < 20);
-    const label = (text, x, y, px) => {
-      const [sx, sy] = toScreen(x, y);
-      if (sx < 0 || sy < 0 || sx > width || sy > height) return;
-      ctx.font = `italic 400 ${px}px ${colors.serif}`;
-      const w = ctx.measureText(text).width;
-      if (!clear(sx - w / 2, sy, w)) return;
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = css(colors.paper, 0.8 * fade);
-      ctx.strokeText(text, sx, sy);
-      ctx.fillStyle = css(colors.muted, fade);
-      ctx.fillText(text, sx, sy);
-      taken.push([sx - w / 2, sy, w]);
-    };
+    const room = (x, y, w) => clears(taken, x, y, w, 8, 20);
     for (const cloud of sky.clouds) {
-      label(cloud.name, cloud.x, cloud.y, Math.round(13 + 5 * Math.sqrt(cloud.projects / largest)));
+      const [sx, sy] = toScreen(cloud.x, cloud.y);
+      if (!onScreen(sx, sy)) continue;
+      const px = Math.round(13 + 5 * Math.sqrt(cloud.projects / largest));
+      const box = serifName(cloud.name, sx, sy, px, 4, css(colors.muted, fade), css(colors.paper, 0.8 * fade), room);
+      if (box) taken.push(box);
     }
-    ctx.restore();
   }
 
   // The belt is a ring, so its name sits on the stretch of it nearest the
@@ -834,58 +856,37 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     const d = Math.hypot(dx, dy);
     const [ux, uy] = d > belt.radius * 0.2 ? [dx / d, dy / d] : [0, -1];
     const [sx, sy] = toScreen(c + ux * belt.radius, c + uy * belt.radius);
-    if (sx < 0 || sy < 0 || sx > width || sy > height) return;
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.font = `italic 400 14px ${colors.serif}`;
-    const w = ctx.measureText(belt.name).width;
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = css(colors.paper, 0.8);
-    ctx.strokeText(belt.name, sx, sy);
-    ctx.fillStyle = css(colors.muted);
-    ctx.fillText(belt.name, sx, sy);
-    taken.push([sx - w / 2, sy, w]);
-    ctx.restore();
+    if (!onScreen(sx, sy)) return;
+    taken.push(serifName(belt.name, sx, sy, 14, 4, css(colors.muted), css(colors.paper, 0.8)));
   }
 
   // Zoomed in past the overview names, the cloud the view is over keeps its
-  // name, large and faint across the top of the view, behind the project
-  // names: at its centroid it was buried under them.
-  function pinCloud() {
+  // name, large and faint across the top of the view, where project names
+  // make room for it: at its centroid it was buried under them.
+  function pinCloud(taken) {
     const strength = 1 - cloudFade();
-    if (!strength || !skyCells) return;
+    if (!strength) return;
     const { grid: size, clouds } = sky;
     const n = cloudAt(skyCells, size, graph.extent, view.cx, view.cy);
     if (!n) return;
     const cloud = clouds[n - 1];
-    const px = 30;
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.font = `italic 400 ${px}px ${colors.serif}`;
     const alpha = Math.min(1, strength * 2);
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = css(colors.paper, 0.7 * alpha);
-    ctx.strokeText(cloud.name, width / 2, px + 8);
-    ctx.fillStyle = css(colors.muted, 0.6 * alpha);
-    ctx.fillText(cloud.name, width / 2, px + 8);
-    ctx.restore();
+    taken.push(
+      serifName(cloud.name, width / 2, 38, 30, 6, css(colors.muted, 0.6 * alpha), css(colors.paper, 0.7 * alpha)),
+    );
   }
 
   // Each cloud in the key, with what lives there and its best-known projects.
   // Choosing one frames its densest cells.
   function listClouds() {
-    const { grid: size, clouds, cells, belt } = sky ?? {};
-    $("cloud-key").hidden = !clouds?.length;
-    if (!clouds?.length) return;
+    const { grid: size, clouds, cells, belt } = sky;
+    $("cloud-key").hidden = !clouds.length;
+    if (!clouds.length) return;
     const items = clouds.map((cloud, n) => {
       const button = el("button", { type: "button", className: "jump", textContent: cloud.name });
       button.addEventListener("click", () => {
-        const [x0, y0, x1, y1] = cloudBounds(cells, size, graph.extent, n + 1);
         cloudsToggle.checked = true;
-        view.k = Math.min(home.k * 16, Math.max(home.k, 0.8 * Math.min(width / (x1 - x0), height / (y1 - y0))));
-        view.cx = (x0 + x1) / 2;
-        view.cy = (y0 + y1) / 2;
-        dirty = true;
+        frameBox(...cloudBounds(cells, size, graph.extent, n + 1), { margin: 0.8, most: 16 });
         statusLine.textContent = `${cloud.name}: ${cloud.about}`;
       });
       return el(
@@ -913,9 +914,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   // of it whenever the view moves.
   const MINI = 136;
   let miniBase = null;
+  const miniScale = () => Math.min(window.devicePixelRatio || 1, 2);
   function renderMinimapBase() {
     if (!graph) return;
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const scale = miniScale();
     minimap.width = minimap.height = MINI * scale;
     miniBase = document.createElement("canvas");
     miniBase.width = miniBase.height = MINI * scale;
@@ -962,38 +964,46 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     // solid knot of ink; lines strengthen as zooming thins them out.
     gl.uniform1f(edgeLoc.u_alpha, Math.min(0.14, 0.012 * zoomGrowth() ** 2));
     gl.uniform1f(edgeLoc.u_traceAlpha, traceAlpha);
-    gl.uniform1f(edgeLoc.u_time, pass ? (now / 1400) % 1 : 0.5);
+    gl.uniform1f(edgeLoc.u_time, pass ? pulsePhase(now) : 0.5);
     gl.uniform1f(edgeLoc.u_k, view.k);
-    if (pass) {
-      if (!tracedCount) return;
-      attrib(edgeLoc.a_pos, buffers.tracedPos, 2);
-      attrib(edgeLoc.a_end, buffers.tracedEnds, 1);
-      attrib(edgeLoc.a_kind, buffers.tracedKinds, 1);
-      attrib(edgeLoc.a_focus, buffers.tracedFocus, 1);
-      attrib(edgeLoc.a_len, buffers.tracedLens, 1);
-      gl.drawArrays(gl.LINES, 0, tracedCount * 2);
-      return;
+    // A constant where every vertex of a draw shares the value: the whole
+    // graph is untraced, and every traced edge is drawn in the current mode.
+    const constant = (location, value) => {
+      gl.disableVertexAttribArray(location);
+      gl.vertexAttrib1f(location, value);
+    };
+    if (!pass) {
+      attrib(edgeLoc.a_pos, buffers.edgePos, 2);
+      attrib(edgeLoc.a_end, buffers.ends, 1);
+      attrib(edgeLoc.a_kind, buffers.kinds, 1);
+      constant(edgeLoc.a_focus, 0);
+      attrib(edgeLoc.a_len, buffers.lens, 1);
+      gl.drawArrays(gl.LINES, 0, edgeCount * 2);
     }
-    attrib(edgeLoc.a_pos, buffers.edgePos, 2);
-    attrib(edgeLoc.a_end, buffers.ends, 1);
-    attrib(edgeLoc.a_kind, buffers.kinds, 1);
-    attrib(edgeLoc.a_focus, buffers.edgeFocus, 1);
-    attrib(edgeLoc.a_len, buffers.lens, 1);
-    gl.drawArrays(gl.LINES, 0, edgeCount * 2);
+    if (!tracedCount) return;
+    attrib(edgeLoc.a_pos, buffers.tracedPos, 2);
+    attrib(edgeLoc.a_end, buffers.tracedEnds, 1);
+    constant(edgeLoc.a_kind, 0);
+    attrib(edgeLoc.a_focus, buffers.tracedFocus, 1);
+    attrib(edgeLoc.a_len, buffers.tracedLens, 1);
+    gl.drawArrays(gl.LINES, 0, tracedCount * 2);
   }
 
   // The beads ride the downstream lines where the edge shader puts its pulse
-  // heads: every 140 or so pixels, at most twelve to a line, and capped in
-  // all so a hub's trace stays cheap to animate.
+  // heads, capped in all so a hub's trace stays cheap to animate.
   const MAX_BEADS = 6000;
   const beadXY = new Float32Array(MAX_BEADS * 2);
   function drawBeads(now) {
-    const phase = (now / 1400) % 1;
+    const phase = pulsePhase(now);
+    const { pos: xy, lens } = tracedEdges;
     let n = 0;
     for (let t = 0; t < tracedCount && n < MAX_BEADS; t++) {
       if (tracedFocus[2 * t] <= 0) continue;
-      const repeat = Math.min(12, Math.max(1, Math.floor((tracedLens[2 * t] * view.k) / 140)));
-      const [ax, ay, bx, by] = tracedPos.subarray(4 * t, 4 * t + 4);
+      const repeat = Math.min(MAX_PULSES, Math.max(1, Math.floor((lens[2 * t] * view.k) / PULSE_PX)));
+      const ax = xy[4 * t];
+      const ay = xy[4 * t + 1];
+      const bx = xy[4 * t + 2];
+      const by = xy[4 * t + 3];
       for (let j = 0; j < repeat && n < MAX_BEADS; j++) {
         // 1 at the dependency, 0 at the dependent: a release travels outward.
         const e = (j + 1 - phase) / repeat;
@@ -1011,6 +1021,21 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     gl.bufferData(gl.ARRAY_BUFFER, beadXY.subarray(0, 2 * n), gl.STREAM_DRAW);
     attrib(beadLoc.a_pos, buffers.beads, 2);
     gl.drawArrays(gl.POINTS, 0, n);
+  }
+
+  function drawClouds() {
+    useProgram(cloudProgram, cloudLoc);
+    gl.uniform1f(cloudLoc.u_extent, graph.extent);
+    // Thinned as the reader zooms in: inside a cloud its haze is the whole
+    // view, and at full strength it washes out the projects.
+    gl.uniform1f(cloudLoc.u_fade, 0.3 + 0.7 * cloudFade());
+    gl.uniform1i(cloudLoc.u_density, 0);
+    gl.uniform1i(cloudLoc.u_tints, 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, buffers.skyTints);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, buffers.sky);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
   function drawNodes(pass) {
@@ -1043,37 +1068,14 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       drawEdges(0, now);
       // Over the edges and under the dots: the haze veils the lines the way a
       // nebula does, and never hides a project.
-      if (cloudsOn() && buffers.sky) {
-        useProgram(cloudProgram, cloudLoc);
-        gl.uniform1f(cloudLoc.u_extent, graph.extent);
-        // Thinned as the reader zooms in: inside a cloud its haze is the
-        // whole view, and at full strength it washes out the projects.
-        gl.uniform1f(cloudLoc.u_fade, 0.3 + 0.7 * cloudFade());
-        gl.uniform1i(cloudLoc.u_density, 0);
-        gl.uniform1i(cloudLoc.u_tints, 1);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, buffers.skyTints);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, buffers.sky);
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      }
+      if (cloudsOn()) drawClouds();
       gl.enable(gl.DEPTH_TEST);
       drawNodes(0);
       gl.disable(gl.DEPTH_TEST);
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.fbo);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.resolved);
-      gl.blitFramebuffer(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
+      const { width: w, height: h } = canvas;
+      gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawLabels();
       drawMinimap();
@@ -1121,7 +1123,6 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     return bestDist <= 6 ? best : -1;
   }
 
-  const pypi = (name) => `https://pypi.org/project/${encodeURIComponent(name)}/`;
   const rankText = (i) => (i < ranked ? `rank ${fmt(i + 1)}` : "ranked only with extras");
   const countsText = (i) => {
     const runtime = graph.dependents[i],
@@ -1141,9 +1142,12 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   function jumpList(heading, items) {
     if (!items.length) return [];
     const list = el("ol");
+    const capped = el("p", { className: "meta", hidden: true });
     const fill = (subset) => {
+      capped.hidden = subset.length <= LIST_MAX || subset.length <= LIST_LIMIT;
+      capped.textContent = `The first ${fmt(LIST_MAX)} of ${fmt(subset.length)} are listed; filter to find the rest.`;
       list.replaceChildren(
-        ...subset.map((i) => {
+        ...subset.slice(0, LIST_MAX).map((i) => {
           const button = el("button", { type: "button", className: "jump", textContent: names[i] });
           // The panel is rebuilt for the new selection, taking this button with
           // it; focus moves to the new project's name rather than to the page.
@@ -1156,9 +1160,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       );
     };
     fill(items.slice(0, LIST_LIMIT));
-    const parts = [el("h2", { textContent: `${heading} (${fmt(items.length)})` }), list];
+    const parts = [el("h2", { textContent: `${heading} (${fmt(items.length)})` }), list, capped];
     if (items.length > LIST_LIMIT) {
-      const more = el("button", { type: "button", className: "jump", textContent: `Show all ${fmt(items.length)}` });
+      const label = items.length > LIST_MAX ? `Show the first ${fmt(LIST_MAX)}` : `Show all ${fmt(items.length)}`;
+      const more = el("button", { type: "button", className: "jump", textContent: label });
       const moreItem = el("p", { className: "meta" }, more);
       more.addEventListener("click", () => {
         fill(items);
@@ -1192,14 +1197,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       detail.replaceChildren();
       return;
     }
-    const link = el("a", {
-      href: pypi(names[i]),
-      id: "detail-name",
-      target: "_blank",
-      rel: "noopener",
-      textContent: names[i],
-    });
-    link.setAttribute("aria-describedby", "new-tab");
+    const link = pypiLink(names[i]);
+    link.id = "detail-name";
     const close = el("button", { type: "button", className: "icon", textContent: "×" });
     close.setAttribute("aria-label", "Clear the selection");
     // Closing removes the panel and this button; focus returns to the graph.
@@ -1219,6 +1218,18 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       ...jumpList("Depended on by", [...down.subarray(downStart[i], downStart[i + 1])]),
     );
     detail.hidden = false;
+  }
+
+  // Fits a data-space box in the view, at least `least` units across so a
+  // single point still gets some sky around it, and above the selection
+  // sheet that covers the bottom of the graph on a narrow screen.
+  function frameBox(x0, y0, x1, y1, { margin = 0.7, least = 0, most = 400 } = {}) {
+    const sheet = narrow.matches && !detail.hidden ? detail.offsetHeight : 0;
+    const fitK = margin * Math.min(width / Math.max(x1 - x0, least), (height - sheet) / Math.max(y1 - y0, least));
+    view.k = Math.min(home.k * most, Math.max(home.k, fitK));
+    view.cx = (x0 + x1) / 2;
+    view.cy = (y0 + y1) / 2 + sheet / 2 / view.k;
+    dirty = true;
   }
 
   function select(i, { fly = false, quiet = false } = {}) {
@@ -1242,23 +1253,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     if (fly) {
       // Frame the whole trace. A family drawn together can sit closer than a
       // dot is wide, so a fixed zoom left a trace hidden under its own origin.
-      let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
-      for (const n of trace.nodes) {
-        x0 = Math.min(x0, pos[2 * n]);
-        x1 = Math.max(x1, pos[2 * n]);
-        y0 = Math.min(y0, pos[2 * n + 1]);
-        y1 = Math.max(y1, pos[2 * n + 1]);
-      }
-      // On a narrow screen the selection sheet covers the bottom of the graph,
-      // so the trace is framed in the space above it.
-      const sheet = narrow.matches ? detail.offsetHeight : 0;
       // A trace of one -- a rim project, with no drawn neighbors -- has no
-      // extent to fit, so it is framed with some sky around it.
-      const least = graph.extent * 0.04;
-      const fitK = 0.7 * Math.min(width / Math.max(x1 - x0, least), (height - sheet) / Math.max(y1 - y0, least));
-      view.k = Math.min(home.k * 400, Math.max(home.k, fitK));
-      view.cx = (x0 + x1) / 2;
-      view.cy = (y0 + y1) / 2 + sheet / 2 / view.k;
+      // extent to fit.
+      const box = bounds(Array.from(trace.nodes, (n) => [pos[2 * n], pos[2 * n + 1]]));
+      frameBox(...box, { least: graph.extent * 0.04 });
     }
   }
 
@@ -1350,7 +1348,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     if (!pointers.size) multiTouch = false;
     if (pointers.size < 2) pinchFrom = null;
     surface.classList.remove("dragging");
-    if (wasClick && e.type === "pointerup" && graph) select(nodeAt(...local(e)));
+    if (!wasClick || e.type !== "pointerup" || !graph) return;
+    // A click on empty sky with nothing selected has nothing to clear or say.
+    const i = nodeAt(...local(e));
+    if (i >= 0 || selected >= 0) select(i);
   };
   surface.addEventListener("pointerup", release);
   surface.addEventListener("pointercancel", release);
@@ -1467,7 +1468,6 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       ),
     );
     while (releases.children.length > 3) releases.lastChild.remove();
-    dirty = true;
   }
   function setSimulating(on) {
     clearInterval(timer);
@@ -1512,11 +1512,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       ? scheduler.yield()
       : new Promise((resolve) => setTimeout(resolve, 0));
 
-  fetch("graph.json")
-    .then((r) => {
-      if (!r.ok) throw new Error(`graph.json: HTTP ${r.status}`);
-      return r.json();
-    })
+  fetchJson(surface.dataset.graph)
     .then(async (data) => {
       await yieldToMain();
       buildIndexes(data);
@@ -1527,6 +1523,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       graph = data;
       upload();
       resize();
+      // A drawing buffer this display cannot have has already said so.
+      if (!graph) return;
       fit();
       setMode(extrasToggle.checked);
       statusLine.classList.add("sr-only");

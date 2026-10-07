@@ -6,8 +6,8 @@ name: Site
 # render rather than a billable extract. `refresh.yml` still owns the monthly
 # data run and deploys its own result.
 #
-# `data/latest.json` and `data/graph.json` are watched for a hand-regenerated payload. The monthly run
-# cannot double-deploy through it: that commit is pushed with GITHUB_TOKEN, and
+# `data/latest.json` and `data/graph.json` are watched for a hand-regenerated
+# payload. The monthly run cannot double-deploy through it: that commit is pushed with GITHUB_TOKEN, and
 # GitHub does not start workflows from those.
 on:
   push:
@@ -58,12 +58,9 @@ jobs:
         # The monthly run removes data/graph.json when its layout fails, so the
         # cascade page is rendered only when the graph is there.
         run: |
-          if [ -f data/graph.json ]; then
-            uv run top-pypi-dependents render --payload data/latest.json \
-              --graph data/graph.json --output site
-          else
-            uv run top-pypi-dependents render --payload data/latest.json --output site
-          fi
+          graph=()
+          if [ -f data/graph.json ]; then graph=(--graph data/graph.json); fi
+          uv run top-pypi-dependents render --payload data/latest.json "${graph[@]}" --output site
 
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

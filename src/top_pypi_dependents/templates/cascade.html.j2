@@ -4,6 +4,11 @@
 {% block body_attrs %} class="app"{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ asset("cascade.css") }}">
+{# Fetched as soon as the page is parsed, not after the script and its imports
+  have each made a round trip. #}
+<link rel="preload" href="{{ graph_url }}" as="fetch" crossorigin>
+<link rel="modulepreload" href="{{ asset("format.js") }}">
+<link rel="modulepreload" href="{{ asset("graph-model.js") }}">
 {% endblock %}
 {% block content %}
 <header class="app-head">
@@ -11,8 +16,8 @@
   <p>Every ranked project and the dependencies between them. Click a project to trace what it depends on and what depends on it.</p>
 </header>
 
-<div class="stage" id="stage">
-  <div class="surface" id="surface" tabindex="0" role="application"
+<div class="stage">
+  <div class="surface" id="surface" data-graph="{{ graph_url }}" tabindex="0" role="application"
     aria-label="Dependency graph. Arrow keys pan, plus and minus zoom, 0 shows the whole graph. Use the search field to find a project and trace it."
     aria-describedby="status">
     <canvas id="gl" aria-hidden="true"></canvas>
@@ -39,7 +44,7 @@
   <section class="panel detail" id="detail" aria-labelledby="detail-name" hidden></section>
 
   <details class="panel key" id="key" open>
-    <summary>Key</summary>
+    <summary class="label">Key</summary>
     <ul class="meta">
       <li><svg width="36" height="8" aria-hidden="true"><defs><linearGradient id="lg-dir" gradientUnits="userSpaceOnUse" x1="0" x2="32" y1="0" y2="0"><stop offset="0" stop-color="currentColor" stop-opacity="0.1"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><path d="M0 4h32" stroke="url(#lg-dir)" stroke-width="1.5"/><circle cx="32" cy="4" r="3" fill="currentColor"/></svg>Strengthens toward the project depended on</li>
       <li><svg width="36" height="8" aria-hidden="true"><path d="M0 4h36" style="stroke: var(--accent)" stroke-width="2"/></svg>Depends on the selection</li>
@@ -47,7 +52,7 @@
     </ul>
     <p>A dot's size is its dependent count. Only projects with at least {{ graph_min_dependents }} dependents are drawn (counting extras when they are switched on), so a trace reaches a project's drawn dependents, not every one: most of numpy's 95,000 are applications nothing else depends on. Projects that share a name prefix, like <code>odoo-*</code>, are drawn near each other. <a href="data.html">How it is counted</a>.</p>
     <details class="clouds" id="cloud-key" hidden>
-      <summary>Clouds</summary>
+      <summary class="label">Clouds</summary>
       <p>Where projects crowd together. Each is named for what lives there; choose one to go to it.</p>
       <ul id="cloud-list"></ul>
     </details>

@@ -277,13 +277,12 @@ button.icon:hover {
   max-width: min(22rem, calc(100% - 1.5rem));
   padding: 0.5rem 0.75rem;
 }
+/* The site's label type, kept a disclosure: `.label` is a block, which would
+  drop the summary's marker. */
 .key summary {
+  display: list-item;
+  margin-bottom: 0;
   cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
 }
 .key ul {
   list-style: none;

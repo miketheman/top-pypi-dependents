@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   adjacency,
+  bounds,
+  cellIndex,
   cloudAt,
   cloudBounds,
   decodeEdges,
@@ -58,4 +60,22 @@ test("cloudAt finds the cell under a point and clamps to the grid", () => {
 test("cloudBounds boxes a cloud's cells in data space", () => {
   const cells = [0, 1, 0, 1];
   assert.deepEqual(cloudBounds(cells, 2, 100, 1), [50, 0, 100, 100]);
+});
+
+test("cellIndex clamps a coordinate onto the grid", () => {
+  assert.equal(cellIndex(0, 100, 4), 0);
+  assert.equal(cellIndex(49.9, 100, 4), 1);
+  assert.equal(cellIndex(100, 100, 4), 3);
+  assert.equal(cellIndex(-1, 100, 4), 0);
+});
+
+test("bounds boxes a set of points", () => {
+  assert.deepEqual(
+    bounds([
+      [3, 4],
+      [-1, 9],
+      [2, 0],
+    ]),
+    [-1, 0, 3, 9],
+  );
 });

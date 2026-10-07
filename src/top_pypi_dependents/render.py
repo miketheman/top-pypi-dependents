@@ -95,14 +95,19 @@ def _readable_date(generated_at: str) -> str:
     return f"{moment:%B} {moment.day}, {moment.year}"
 
 
-def _write_assets(out_dir: Path) -> dict[str, str]:
-    """Copy the stylesheets and scripts beside the pages; return their URLs.
+def _versioned(path: str, content: bytes) -> str:
+    """A URL for a file the pages load, carrying a hash of its content.
 
-    Each URL carries a hash of the file's content, so a returning reader's
-    cached copy is dropped exactly when the file changes rather than up to ten
-    minutes later, when Pages' cache lets go -- a page's markup and its script
-    from different months would not agree on ids.
+    A returning reader's cached copy is dropped exactly when the file changes
+    rather than up to ten minutes later, when Pages' cache lets go: a page's
+    markup, its script and the data the script reads, from different months,
+    would not agree on ids or on fields.
     """
+    return f"./{path}?v={hashlib.sha256(content).hexdigest()[:12]}"
+
+
+def _write_assets(out_dir: Path) -> dict[str, str]:
+    """Copy the stylesheets and scripts beside the pages; return their URLs."""
     target = out_dir / "assets"
     target.mkdir(parents=True, exist_ok=True)
     urls = {}
@@ -110,8 +115,7 @@ def _write_assets(out_dir: Path) -> dict[str, str]:
     for source in sorted(sources, key=lambda source: source.name):
         content = source.read_bytes()
         (target / source.name).write_bytes(content)
-        digest = hashlib.sha256(content).hexdigest()[:12]
-        urls[source.name] = f"./assets/{source.name}?v={digest}"
+        urls[source.name] = _versioned(f"assets/{source.name}", content)
     return urls
 
 
@@ -147,7 +151,7 @@ def render_site(
     rows: int = ROWS,
     graph: Path | None = None,
 ) -> None:
-    """Write both pages, both JSON copies and the search index into ``out_dir``.
+    """Write the pages, the JSON copies and the search index into ``out_dir``.
 
     ``rows`` is how many ranked projects the page lists; the search index
     covers the rest. With a ``graph`` file, the cascade page is rendered too.
@@ -213,7 +217,9 @@ def render_site(
 
     # Fetched by the rankings page only once a search runs, so it costs an
     # arriving reader nothing.
-    (out_dir / "search-index.json").write_text(_search_index(payload), encoding="utf-8")
+    index = _search_index(payload).encode()
+    (out_dir / "search-index.json").write_bytes(index)
+    shared["search_index_url"] = _versioned("search-index.json", index)
 
     # The method, the limitations and the query examples, on their own page. A
     # reader who came for the graph may never look at the table, and a reader
@@ -239,6 +245,7 @@ def render_site(
                 # ranking's and counts extras: the drawn set is every project
                 # that clears it once extras count.
                 graph_min_dependents=graph_data["min_dependents"],
+                graph_url=_versioned("graph.json", graph_bytes),
                 **shared,
             ),
             encoding="utf-8",

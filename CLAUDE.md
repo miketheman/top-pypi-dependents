@@ -187,7 +187,7 @@ projects declared in October 2026. Snapshots ranked before that change counted t
 ```bash
 make install          # uv sync
 make lint             # ruff format --check, ruff check, ty check, biome ci
-make test             # coverage run -m pytest, coverage report, node --test
+make test             # coverage run -m pytest, coverage report, npm test
 prek run --all-files  # the git-hook gate; must pass on a clean clone
 ```
 
@@ -199,7 +199,7 @@ uv sync --group bigquery       # 214 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
-`bigquery` group. `node --test tests/js/*.test.js` runs 11 more, against the pure
+`bigquery` group. `npm test` runs 14 more, against the pure
 modules the pages import.
 
 Full pipeline against the fixture, no credentials needed:

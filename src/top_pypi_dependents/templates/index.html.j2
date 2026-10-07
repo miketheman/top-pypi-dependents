@@ -44,7 +44,7 @@ runtime dependency on them, read from each project's latest release.</p>
   total on every keystroke. #}
 <p class="sr-only" id="announce" role="status"></p>
 
-<table id="rows" data-on-page="{{ on_page }}" data-ranked="{{ row_count }}"{% if show_change %} data-show-change{% endif %}>
+<table id="rows" data-on-page="{{ on_page }}" data-ranked="{{ row_count }}" data-index="{{ search_index_url }}"{% if show_change %} data-show-change{% endif %}>
   <caption class="sr-only">PyPI projects in rank order, most depended on first.
     Dependents counts unconditional runtime dependencies; Incl. extras counts
     every declared one.</caption>

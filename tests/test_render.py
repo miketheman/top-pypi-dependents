@@ -1,30 +1,21 @@
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from top_pypi_dependents import artifacts, render, warehouse
-from top_pypi_dependents.sources.fixture import FixtureSource
+from top_pypi_dependents import artifacts, render
 
-FIXTURES = Path(__file__).parent / "fixtures"
-# The fixture corpus is far below the production plausibility floors.
-FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import duckdb
 
 
 @pytest.fixture
-def payload() -> dict:
-    con = warehouse.connect(None)
-    warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
-        con,
-        source=FixtureSource(FIXTURES),
-        captured_at=datetime(2026, 9, 1, tzinfo=UTC),
-        floors=FLOORS,
-    ).snapshot_id
-    warehouse.compute_rankings(con, snapshot_id)
+def payload(con_and_snapshot: tuple[duckdb.DuckDBPyConnection, int]) -> dict:
+    con, snapshot_id = con_and_snapshot
     return artifacts.build_payload(
         con,
         snapshot_id,
@@ -262,8 +253,9 @@ def test_rankings_page_searches_past_its_own_rows(
     """A project ranked past the page is still findable by name."""
     render.render_site(payload, tmp_path, rows=1)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    script = (tmp_path / "assets" / "rankings.js").read_text(encoding="utf-8")
-    assert 'fetch("search-index.json")' in script
+    index = (tmp_path / "search-index.json").read_bytes()
+    digest = hashlib.sha256(index).hexdigest()[:12]
+    assert f'data-index="./search-index.json?v={digest}"' in html
     assert 'id="beyond"' in html
 
 
@@ -481,8 +473,8 @@ def test_a_graph_adds_the_cascade_page_and_serves_the_graph(
     assert (site / "graph.json").read_bytes() == source.read_bytes()
     page = (site / "cascade.html").read_text(encoding="utf-8")
     assert 'href="cascade.html" aria-current="page"' in page
-    script = (site / "assets" / "cascade.js").read_text(encoding="utf-8")
-    assert 'fetch("graph.json")' in script
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:12]
+    assert f'data-graph="./graph.json?v={digest}"' in page
     assert 'href="cascade.html"' in (site / "index.html").read_text(encoding="utf-8")
 
 
@@ -516,6 +508,17 @@ def test_scripts_import_each_other_through_the_versioned_urls(
     imports = json.loads(found.group(1))["imports"]
     assert imports["./assets/format.js"].startswith("./assets/format.js?v=")
     assert not any(name.endswith(".css") for name in imports)
+
+
+def test_the_import_map_comes_before_any_module_load(
+    tmp_path: Path, payload: dict
+) -> None:
+    """A browser without merged import maps drops one that follows a preload."""
+    render.render_site(
+        payload, tmp_path / "site", rows=2, graph=_graph_file(tmp_path, payload)
+    )
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert html.index('<script type="importmap">') < html.index("modulepreload")
 
 
 def test_links_off_the_site_open_a_new_tab_and_say_so(

@@ -95,15 +95,20 @@ jobs:
       # The cascade page is the optional part of the run. If laying out the
       # graph fails, the month's ranking, release and site still ship -- only
       # without the cascade page -- rather than throwing away a billable query.
-      # Committed beside data/latest.json so `site.yml` can render it too.
+      # Committed beside data/latest.json so `site.yml` can render it too. A
+      # failure removes last month's graph, which render would rightly refuse
+      # as stale; every render then simply finds no graph to draw.
       - name: Graph
-        id: graph
         if: inputs.dry_run != true
         continue-on-error: true
         run: |
           uv run top-pypi-dependents graph \
             --database build/dependents.duckdb \
-            --output data/graph.json
+            --output data/graph.json || {
+            echo "::warning::graph failed; publishing without the cascade page"
+            rm -f data/graph.json
+            exit 1
+          }
 
       - name: Name the database for the release
         if: inputs.dry_run != true
@@ -111,22 +116,13 @@ jobs:
           MONTH: ${{ steps.stamp.outputs.month }}
         run: mv build/dependents.duckdb "build/dependents-${MONTH}.duckdb"
 
-      # A failed graph leaves last month's data/graph.json behind, which render
-      # rightly refuses as stale. It is removed, so this run and `site.yml`
-      # both render without the cascade page until next month.
+      # The same rule as `site.yml`: the cascade page when there is a graph.
       - name: Render
         if: inputs.dry_run != true
-        env:
-          GRAPH_OUTCOME: ${{ steps.graph.outcome }}
         run: |
-          if [ "${GRAPH_OUTCOME}" = "success" ]; then
-            uv run top-pypi-dependents render --payload data/latest.json \
-              --graph data/graph.json --output site
-          else
-            echo "::warning::graph failed; publishing without the cascade page"
-            rm -f data/graph.json
-            uv run top-pypi-dependents render --payload data/latest.json --output site
-          fi
+          graph=()
+          if [ -f data/graph.json ]; then graph=(--graph data/graph.json); fi
+          uv run top-pypi-dependents render --payload data/latest.json "${graph[@]}" --output site
 
       - name: Commit the ranked JSON
         if: inputs.dry_run != true

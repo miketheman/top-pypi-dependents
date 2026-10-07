@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canonical, fmt, plural } from "../../src/top_pypi_dependents/assets/format.js";
+import { canonical, fmt, plural, pypiUrl } from "../../src/top_pypi_dependents/assets/format.js";
 
 test("canonical matches how PyPI normalizes a name", () => {
   assert.equal(canonical("  Zope.Interface "), "zope-interface");
@@ -16,4 +16,9 @@ test("plural says one without an s", () => {
   assert.equal(plural(1, "project"), "1 project");
   assert.equal(plural(0, "project"), "0 projects");
   assert.equal(plural(2500, "project"), "2,500 projects");
+});
+
+test("pypiUrl links a project's page, escaping what needs it", () => {
+  assert.equal(pypiUrl("zope-interface"), "https://pypi.org/project/zope-interface/");
+  assert.equal(pypiUrl("a b"), "https://pypi.org/project/a%20b/");
 });

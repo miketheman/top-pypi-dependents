@@ -35,17 +35,6 @@ def _row_count(con: duckdb.DuckDBPyConnection, table: str) -> int:
     return result[0]
 
 
-@pytest.fixture
-def con_and_snapshot() -> ConAndSnapshot:
-    con = warehouse.connect(None)
-    warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
-        con, source=FixtureSource(FIXTURES), captured_at=CAPTURED, floors=FLOORS
-    ).snapshot_id
-    warehouse.compute_rankings(con, snapshot_id)
-    return con, snapshot_id
-
-
 def test_snapshot_row_records_provenance(con_and_snapshot: ConAndSnapshot) -> None:
     con, snapshot_id = con_and_snapshot
     row = con.execute(

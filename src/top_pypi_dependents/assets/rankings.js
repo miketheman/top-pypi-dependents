@@ -1,4 +1,4 @@
-import { canonical, fmt } from "./format.js";
+import { canonical, fetchJson, fmt, pypiLink } from "./format.js";
 import { pastPage } from "./search.js";
 
 // Matches against data-name rather than a cell's text: position-independent,
@@ -35,13 +35,7 @@ function loadIndex() {
     return;
   }
   indexState = "loading";
-  fetch("search-index.json")
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(response.status);
-      }
-      return response.json();
-    })
+  fetchJson(table.dataset.index)
     .then((data) => {
       index = data.projects;
       indexState = "ready";
@@ -99,13 +93,7 @@ function beyondRow([project, rank, dependents, dependentsAll, change]) {
   tr.append(cell("num rank", fmt(rank)));
 
   const name = document.createElement("td");
-  const link = document.createElement("a");
-  link.href = `https://pypi.org/project/${encodeURIComponent(project)}/`;
-  link.target = "_blank";
-  link.rel = "noopener";
-  link.setAttribute("aria-describedby", "new-tab");
-  link.textContent = project;
-  name.append(link);
+  name.append(pypiLink(project));
   tr.append(name);
 
   tr.append(cell("num", fmt(dependents)));

@@ -17,8 +17,10 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c6-9 18-9 24 0-6 9-18 9-24 0z' fill='none' stroke='%233f5a3a' stroke-width='2'/%3E%3Cpath d='M4 16h24' fill='none' stroke='%233f5a3a' stroke-width='1.2'/%3E%3C/svg%3E">
 <link rel="icon" media="(prefers-color-scheme: dark)" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c6-9 18-9 24 0-6 9-18 9-24 0z' fill='none' stroke='%23a2c087' stroke-width='2'/%3E%3Cpath d='M4 16h24' fill='none' stroke='%23a2c087' stroke-width='1.2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="{{ asset("site.css") }}">
-{% block head %}{% endblock %}
+{# Ahead of the head block: a browser without merged import maps ignores one
+  that follows a modulepreload. #}
 <script type="importmap">{{ importmap | tojson }}</script>
+{% block head %}{% endblock %}
 </head>
 <body{% block body_attrs %}{% endblock %}>
 <a class="skip" href="#content">Skip to content</a>

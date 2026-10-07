@@ -202,7 +202,7 @@ def _graph(args: argparse.Namespace) -> int:
             previous=previous,
         )
         con.close()
-        graph.write_graph(payload, out)
+        artifacts.write_json(payload, out)
         outcome["nodes"] = len(payload["names"])
         outcome["edges"] = len(payload["edges"]["gaps"])
         outcome["extra_edges"] = len(payload["extra_edges"]["gaps"])

@@ -43,7 +43,7 @@ jobs:
       - name: Lint and format check scripts and styles
         run: biome ci
       - name: Test scripts
-        run: node --test tests/js/*.test.js
+        run: npm test
       # Runs without the bigquery group on purpose: this is what proves the
       # google-cloud-bigquery and urllib3 imports are genuinely lazy, so every
       # subcommand except `extract` works on a default sync.

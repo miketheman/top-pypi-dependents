@@ -1,33 +1,11 @@
-import json
 import math
-from datetime import UTC, datetime
-from pathlib import Path
 
 import duckdb
 import pytest
 
 from top_pypi_dependents import graph, warehouse
-from top_pypi_dependents.sources.fixture import FixtureSource
-
-FIXTURES = Path(__file__).parent / "fixtures"
-# The fixture corpus is far below the production plausibility floors.
-FLOORS = warehouse.Floors(winners=1, live_names=1, audit_sample=1)
 
 ConAndSnapshot = tuple[duckdb.DuckDBPyConnection, int]
-
-
-@pytest.fixture
-def con_and_snapshot() -> ConAndSnapshot:
-    con = warehouse.connect(None)
-    warehouse.create_schema(con)
-    snapshot_id = warehouse.load_snapshot(
-        con,
-        source=FixtureSource(FIXTURES),
-        captured_at=datetime(2026, 9, 1, tzinfo=UTC),
-        floors=FLOORS,
-    ).snapshot_id
-    warehouse.compute_rankings(con, snapshot_id)
-    return con, snapshot_id
 
 
 def test_nodes_are_the_ranked_projects_in_rank_order(
@@ -206,18 +184,6 @@ def test_two_of_a_prefix_are_not_yet_a_family() -> None:
         assert math.hypot(x - center, y - center) > 0.44 * graph.EXTENT
 
 
-def test_write_graph_is_compact_json(
-    tmp_path: Path, con_and_snapshot: ConAndSnapshot
-) -> None:
-    con, snapshot_id = con_and_snapshot
-    payload = graph.build_graph(con, snapshot_id, min_dependents=1)
-    out = tmp_path / "data" / "graph.json"
-    graph.write_graph(payload, out)
-    text = out.read_text(encoding="utf-8")
-    assert json.loads(text) == payload
-    assert '": ' not in text
-
-
 def test_an_unknown_snapshot_is_an_error(con_and_snapshot: ConAndSnapshot) -> None:
     con, _ = con_and_snapshot
     with pytest.raises(ValueError, match="no snapshot with id 99"):
@@ -335,6 +301,13 @@ def test_the_rim_band_is_named_only_when_occupied() -> None:
     assert rim["belt"]["name"] == "Kuiper Belt"
 
 
+def test_a_rim_held_only_by_extras_is_no_belt_without_them() -> None:
+    """The second project is drawn only with extras, and it alone is on the rim."""
+    positions = [(5000, 5000), (5000, 200)]
+    assert graph.clouds(["a", "b"], positions, ranked=1)["belt"] is None
+    assert graph.clouds(["a", "b"], positions, ranked=2)["belt"] is not None
+
+
 def test_an_empty_sky_has_no_clouds() -> None:
     sky = graph.clouds([], [], ranked=0)
     assert sky["clouds"] == []
@@ -366,7 +339,7 @@ def test_a_new_family_member_starts_beside_its_family() -> None:
     """odoo-new has no edges of its own; its family hub knows where to put it."""
     names = ["odoo14-a", "odoo12-b", "odoo-new", "numpy", "pandas"]
     edges = [(4, 3)]
-    layout_graph, _ = graph._layout_graph(names, edges, [])  # noqa: SLF001
+    layout_graph, _ = graph._layout_graph(names, edges, [])  # noqa: SLF001 -- the hubs exist only here
     vertices = [v for v in range(layout_graph.vcount()) if layout_graph.degree(v)]
     known = {
         0: (9000.0, 5000.0),
@@ -388,7 +361,7 @@ def test_a_new_family_member_starts_beside_its_family() -> None:
 def test_a_new_pair_with_nothing_known_starts_in_the_middle() -> None:
     """alpha and beta are new and only know each other: no neighbor to start by."""
     names = ["numpy", "pandas", "alpha", "beta"]
-    layout_graph, _ = graph._layout_graph(names, [(1, 0), (3, 2)], [])  # noqa: SLF001
+    layout_graph, _ = graph._layout_graph(names, [(1, 0), (3, 2)], [])  # noqa: SLF001 -- the hubs exist only here
     known = {0: (1000.0, 5000.0), 1: (1100.0, 5000.0)}
     seeds = graph.seed_positions(layout_graph, [0, 1, 2, 3], 4, known)
     assert seeds[2] == seeds[3] == (0.0, 0.0)

@@ -28,8 +28,8 @@ format: $(INSTALL_STAMP)
 	@biome check --write
 
 test: $(INSTALL_STAMP)
-	@uv run coverage run -m pytest ; uv run coverage report
-	@node --test tests/js/*.test.js
+	@uv run coverage run -m pytest ; status=$$? ; uv run coverage report ; exit $$status
+	@npm test --silent
 
 hooks:
 	@prek run --all-files

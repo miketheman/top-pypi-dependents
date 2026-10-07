@@ -96,25 +96,36 @@ export function spreadCells(cells, size, passes) {
   return spread;
 }
 
-// The cloud number of the cell holding a point in data space, clamped to the
-// grid; zero is no cloud.
+// The cell, of `size` across `extent`, holding a data-space coordinate,
+// clamped to the grid.
+export const cellIndex = (v, extent, size) => Math.min(size - 1, Math.max(0, Math.floor((v / extent) * size)));
+
+// The cloud number of the cell holding a point in data space; zero is no cloud.
 export function cloudAt(cells, size, extent, x, y) {
-  const cell = (v) => Math.min(size - 1, Math.max(0, Math.floor((v / extent) * size)));
-  return cells[cell(y) * size + cell(x)];
+  return cells[cellIndex(y, extent, size) * size + cellIndex(x, extent, size)];
 }
 
-// The data-space box around a cloud's cells, as `[x0, y0, x1, y1]`.
+// The box around some points, as `[x0, y0, x1, y1]`.
+export function bounds(points) {
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y] of points) {
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+  }
+  return [x0, y0, x1, y1];
+}
+
+// The data-space box around a cloud's cells.
 export function cloudBounds(cells, size, extent, cloud) {
   const step = extent / size;
-  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  const corners = [];
   cells.forEach((c, k) => {
     if (c !== cloud) return;
     const x = (k % size) * step;
     const y = Math.floor(k / size) * step;
-    x0 = Math.min(x0, x);
-    x1 = Math.max(x1, x + step);
-    y0 = Math.min(y0, y);
-    y1 = Math.max(y1, y + step);
+    corners.push([x, y], [x + step, y + step]);
   });
-  return [x0, y0, x1, y1];
+  return bounds(corners);
 }
