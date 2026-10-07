@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 LEVELS = ("debug", "info", "warning", "error")
 
@@ -46,7 +46,7 @@ def _fields(values: dict[str, object]) -> str:
 
 
 @contextmanager
-def stage(logger: logging.Logger, name: str) -> Iterator[dict[str, object]]:
+def stage(logger: logging.Logger, name: str) -> Generator[dict[str, object]]:
     """Log a stage's start, duration, and outcome.
 
     Yields a dict the body fills in with whatever the stage turned out to have
