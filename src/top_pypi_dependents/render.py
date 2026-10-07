@@ -121,7 +121,7 @@ def render_site(
         "source_url": _SOURCE_LINKS.get(payload["source"]),
         "project_count": payload["project_count"],
         "edge_count": payload["edge_count"],
-        # The corpus counts above describe what was analysed. Without these two
+        # The corpus counts above describe what was analyzed. Without these two
         # the footer reads as though the file holds a million rows, which it has
         # not since `min_dependents` started cutting the single-dependent tail.
         "row_count": len(payload["rows"]),

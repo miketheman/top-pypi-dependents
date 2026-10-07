@@ -133,7 +133,7 @@ def test_data_page_links_both_data_downloads(tmp_path: Path, payload: dict) -> N
 def test_footer_separates_corpus_size_from_rows_listed(
     tmp_path: Path, payload: dict
 ) -> None:
-    """The corpus numbers describe what was analysed, not what the file holds."""
+    """The corpus numbers describe what was analyzed, not what the file holds."""
     render.render_site(payload, tmp_path, rows=2)
     text = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "Ranked from 16 projects and 25 dependency edges" in text
