@@ -43,7 +43,7 @@ full dependency graph &mdash; every declared edge, not just the ranked totals.</
 <a href="latest.json">latest.json</a> to read, or
 <a href="latest.min.json">latest.min.json</a> to fetch. Both hold the same payload.
 The complete dependency graph is published as a DuckDB database and a Parquet edge list
-on each <a href="https://github.com/miketheman/top-pypi-dependents/releases">release</a>.</p>
+on each <a href="https://github.com/miketheman/top-pypi-dependents/releases" target="_blank" rel="noopener" aria-describedby="new-tab">release</a>.</p>
 
 <h3>What the JSON looks like</h3>
 <p>The shape below is generated from the payload this page was built from, so it cannot
@@ -57,7 +57,7 @@ had to clear to appear at all.</p>
 <h3>Querying the graph</h3>
 <p>The Parquet edge list carries the liveness of both endpoints, so it can reproduce the
 ranking on its own &mdash; no database needed. With the
-<a href="https://duckdb.org/docs/installation/">DuckDB CLI</a>:</p>
+<a href="https://duckdb.org/docs/installation/" target="_blank" rel="noopener" aria-describedby="new-tab">DuckDB CLI</a>:</p>
 <pre><code>SELECT dependency, count(DISTINCT dependent) AS dependents
 FROM 'edges-{{ asset_month }}.parquet'
 WHERE is_runtime AND dependent_is_live AND dependency_is_live

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -446,7 +447,8 @@ def test_the_footer_links_the_source_it_names(tmp_path: Path, payload: dict) -> 
     render.render_site({**payload, "source": "bigquery"}, tmp_path, rows=2)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert (
-        '<a href="https://docs.pypi.org/api/bigquery/#project-metadata-table">'
+        '<a href="https://docs.pypi.org/api/bigquery/#project-metadata-table"'
+        ' target="_blank" rel="noopener" aria-describedby="new-tab">'
         "PyPI metadata on BigQuery</a>" in html
     )
 
@@ -458,3 +460,15 @@ def test_a_source_with_no_documentation_is_not_linked(
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "the checked-in fixture" in html
     assert '<a href="https://docs.pypi.org' not in html
+
+
+def test_links_off_the_site_open_a_new_tab_and_say_so(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, rows=2)
+    for page in ("index.html", "data.html"):
+        html = (tmp_path / page).read_text(encoding="utf-8")
+        assert '<span id="new-tab" hidden>Opens in a new tab</span>' in html
+        for anchor in re.findall(r'<a href="https?://[^"]*"[^>]*>', html):
+            assert 'target="_blank" rel="noopener"' in anchor, anchor
+            assert 'aria-describedby="new-tab"' in anchor, anchor

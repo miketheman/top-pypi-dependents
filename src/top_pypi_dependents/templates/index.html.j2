@@ -65,7 +65,7 @@ runtime dependency on them, read from each project's latest release.</p>
   {% for row in rows %}
     <tr data-name="{{ row.project }}">
       <td class="num rank">{{ "{:,}".format(row.rank) }}</td>
-      <td><a href="https://pypi.org/project/{{ row.project }}/">{{ row.project }}</a></td>
+      <td><a href="https://pypi.org/project/{{ row.project }}/" target="_blank" rel="noopener" aria-describedby="new-tab">{{ row.project }}</a></td>
       <td class="num">{{ "{:,}".format(row.dependents) }}</td>
       <td class="num hide-narrow">{{ "{:,}".format(row.dependents_all) }}</td>
       {% if show_change %}
@@ -171,6 +171,9 @@ function beyondRow([project, rank, dependents, dependentsAll, change]) {
   const name = document.createElement("td");
   const link = document.createElement("a");
   link.href = `https://pypi.org/project/${encodeURIComponent(project)}/`;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.setAttribute("aria-describedby", "new-tab");
   link.textContent = project;
   name.append(link);
   tr.append(name);

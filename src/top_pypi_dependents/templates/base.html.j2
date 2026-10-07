@@ -356,6 +356,20 @@
   }
   footer p { margin: 0.25rem 0; }
 
+  /* A link that leaves the site opens a new tab, and says so before it is
+    followed: a small arrow for the eye, one shared description for a screen
+    reader. The arrow is decoration, so its alt text is empty -- a browser
+    that cannot read that syntax keeps the plain declaration above it. Inline
+    block, so the link's underline does not run under the arrow. */
+  a[target="_blank"]::after {
+    content: "\2197";
+    content: "\2197" / "";
+    display: inline-block;
+    margin-left: 0.15em;
+    font-size: 0.8em;
+    color: var(--ink-subtle);
+  }
+
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
@@ -406,6 +420,7 @@
 </head>
 <body>
 <a class="skip" href="#content">Skip to content</a>
+<span id="new-tab" hidden>Opens in a new tab</span>
 {# Two links styled identically gave a two-page site no wayfinding at all
   beyond its own h1. #}
 <nav>
@@ -417,7 +432,7 @@
 </main>
 <footer>
   <p class="meta">Generated {{ generated_at }} from
-    {%- if source_url %} <a href="{{ source_url }}">{{ source }}</a>
+    {%- if source_url %} <a href="{{ source_url }}" target="_blank" rel="noopener" aria-describedby="new-tab">{{ source }}</a>
     {%- else %} {{ source }}{% endif %}.</p>
   <p class="meta">Ranked from {{ "{:,}".format(project_count) }} projects and {{ "{:,}".format(edge_count) }} dependency edges.</p>
   <p class="meta">{{ "{:,}".format(row_count) }} projects with at least {{ min_dependents }} dependent{{ "s" if min_dependents != 1 else "" }} are listed.</p>
