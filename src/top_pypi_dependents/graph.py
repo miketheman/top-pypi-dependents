@@ -327,43 +327,206 @@ FAMILY_SHARE = 0.4
 # Names for the neighborhoods the layout forms, matched by a family that
 # dominates the cloud or by a project it contains. First match wins, each name
 # is used once, and the largest cloud claims a name first. A cloud nothing
-# matches is named for its best-known project.
-_CLOUD_NAMES: tuple[tuple[str, str, str], ...] = (
-    ("family", "odoo", "the Oort Cloud"),
-    ("family", "pyobjc", "Cocoa Moon"),
-    ("family", "adafruit", "the Blinka Belt"),
-    ("family", "types", "the Shadow Moons"),
-    ("family", "alibabacloud", "the Tea Garden"),
-    ("family", "ros", "the Robot Rings"),
-    ("family", "tree", "the Sapling Belt"),
-    ("family", "aws", "Cloud Formation"),
-    ("family", "azure", "Azure Sky"),
-    ("family", "opentelemetry", "the Telescope Array"),
-    ("family", "qiskit", "the Quantum Foam"),
-    ("family", "plone", "Planet Plone"),
-    ("family", "zope", "the Pyramids"),
-    ("family", "textual", "Terminal Velocity"),
-    ("project", "streamlit", "the Stellar Stream"),
-    ("project", "jupyterlab", "Jupiter"),
-    ("project", "django", "the Pony Nebula"),
-    ("project", "flask", "the Flask Nebula"),
-    ("project", "numpy", "the Numeric Nebula"),
-    ("project", "transformers", "the Tensor Nebula"),
-    ("project", "mcp", "the Agent Nebula"),
-    ("project", "astropy", "the Star Charts"),
-    ("project", "xarray", "the Star Charts"),
-    ("project", "requests", "the Galactic Core"),
-    ("project", "build", "the Tool Belt"),
-    ("project", "plone-api", "Planet Plone"),
-    ("project", "google-auth", "the Googleplex"),
-    ("project", "werkzeug", "the Pallets Pleiades"),
-    ("project", "mkdocs", "the Markdown Moons"),
-    ("project", "pyqt5", "the Qt Quasar"),
-    ("project", "docutils", "the Sphinx"),
-    ("project", "pydantic-ai", "the Small Magellanic Cloud"),
+# matches is named for its best-known project. Each carries a line saying what
+# lives there, because a name like "Pony Nebula" means nothing to a reader
+# who does not already know Django's mascot.
+_CLOUD_NAMES: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "family",
+        "odoo",
+        "Odoo Orbit",
+        "Odoo's add-ons, thousands of them, circling the ERP they extend.",
+    ),
+    (
+        "family",
+        "pyobjc",
+        "Cocoa Moon",
+        "PyObjC's bridges to Apple's Cocoa frameworks.",
+    ),
+    (
+        "family",
+        "adafruit",
+        "Blinka Belt",
+        "Adafruit's CircuitPython drivers, which run on a computer through Blinka.",
+    ),
+    (
+        "family",
+        "types",
+        "Shadow Moons",
+        "Type stubs: types-* packages that shadow the libraries they describe.",
+    ),
+    (
+        "family",
+        "alibabacloud",
+        "Tea Garden",
+        "Alibaba Cloud's SDKs, one per service, grown from its Tea core.",
+    ),
+    (
+        "family",
+        "ros",
+        "Robot Rings",
+        "Packages for ROS, the Robot Operating System.",
+    ),
+    (
+        "family",
+        "tree",
+        "Sapling Belt",
+        "tree-sitter grammars, one package per language.",
+    ),
+    (
+        "family",
+        "aws",
+        "Cloud Formation",
+        "Libraries for Amazon Web Services.",
+    ),
+    (
+        "family",
+        "azure",
+        "Azure Sky",
+        "Microsoft's Azure SDK, one package per service.",
+    ),
+    (
+        "family",
+        "opentelemetry",
+        "Telescope Array",
+        "OpenTelemetry's instrumentation, one package per library it observes.",
+    ),
+    (
+        "family",
+        "qiskit",
+        "Quantum Foam",
+        "Qiskit and the quantum computing projects around it.",
+    ),
+    (
+        "family",
+        "plone",
+        "Planet Plone",
+        "Plone, the content management system, and its add-ons.",
+    ),
+    (
+        "family",
+        "zope",
+        "Pyramids",
+        "Zope's components, which Plone and Pyramid grew from.",
+    ),
+    (
+        "family",
+        "textual",
+        "Terminal Velocity",
+        "Terminal apps built on Textual.",
+    ),
+    (
+        "project",
+        "streamlit",
+        "Stellar Stream",
+        "Streamlit and the components built for it.",
+    ),
+    (
+        "project",
+        "jupyterlab",
+        "Jupiter",
+        "Jupyter: notebooks, kernels and their extensions.",
+    ),
+    (
+        "project",
+        "django",
+        "Pony Nebula",
+        "Django and its apps; the pony is Django's unofficial mascot.",
+    ),
+    (
+        "project",
+        "flask",
+        "Flask Nebula",
+        "Flask and its extensions.",
+    ),
+    (
+        "project",
+        "numpy",
+        "Numeric Nebula",
+        "NumPy and the scientific projects that build on it.",
+    ),
+    (
+        "project",
+        "transformers",
+        "Tensor Nebula",
+        "Machine learning around Hugging Face's Transformers.",
+    ),
+    (
+        "project",
+        "mcp",
+        "Agent Nebula",
+        "AI agents and Model Context Protocol servers.",
+    ),
+    (
+        "project",
+        "astropy",
+        "Star Charts",
+        "Astronomy and earth science, around Astropy and xarray.",
+    ),
+    (
+        "project",
+        "xarray",
+        "Star Charts",
+        "Astronomy and earth science, around Astropy and xarray.",
+    ),
+    (
+        "project",
+        "requests",
+        "Galactic Core",
+        "The dense heart of the map, around requests and its neighbors.",
+    ),
+    (
+        "project",
+        "build",
+        "Tool Belt",
+        "Packaging and developer tooling.",
+    ),
+    (
+        "project",
+        "plone-api",
+        "Planet Plone",
+        "Plone, the content management system, and its add-ons.",
+    ),
+    (
+        "project",
+        "google-auth",
+        "Googleplex",
+        "Google's client libraries.",
+    ),
+    (
+        "project",
+        "werkzeug",
+        "Pallets Pleiades",
+        "The Pallets projects, Werkzeug, Jinja and Click, and what builds on them.",
+    ),
+    (
+        "project",
+        "mkdocs",
+        "Markdown Moons",
+        "MkDocs, its themes and its plugins.",
+    ),
+    (
+        "project",
+        "pyqt5",
+        "Qt Quasar",
+        "Desktop interfaces built on Qt.",
+    ),
+    (
+        "project",
+        "docutils",
+        "Sphinx",
+        "Sphinx, docutils and the documentation tooling around them.",
+    ),
+    (
+        "project",
+        "pydantic-ai",
+        "Small Magellanic Cloud",
+        "A satellite of the Agent Nebula: projects built on Pydantic AI.",
+    ),
 )
 # The band around the rim, where projects with nothing to be pulled toward sit.
-BELT_NAME = "the Asteroid Belt"
+BELT_NAME = "Kuiper Belt"
+BELT_ABOUT = "Projects with no drawn dependency to pull them inward, ringing the map."
 # How many haze tints the page carries. Clouds closer than ``TINT_REACH`` cells
 # never share one, so two neighbors read as two clouds rather than one.
 TINTS = 6
@@ -415,21 +578,26 @@ def _blur(grid: list[list[float]]) -> list[list[float]]:
     ]
 
 
-def _cloud_name(members: list[str], used: set[str]) -> str:
+def _cloud_name(members: list[str], used: set[str]) -> tuple[str, str, list[str]]:
+    """The cloud's name, what lives there, and its best-known members.
+
+    Members arrive in rank order. A cloud named for a family shows that
+    family's best known, not whatever popular project happens to sit inside it.
+    """
     families: dict[str, int] = {}
     for name in members:
         prefix = family(name)
         if prefix is not None:
             families[prefix] = families.get(prefix, 0) + 1
     present = set(members)
-    for kind, key, label in _CLOUD_NAMES:
+    for kind, key, label, about in _CLOUD_NAMES:
         if label in used:
             continue
         if kind == "family" and families.get(key, 0) >= FAMILY_SHARE * len(members):
-            return label
+            return label, about, [m for m in members if family(m) == key][:3]
         if kind == "project" and key in present:
-            return label
-    return f"the {members[0]} cloud"
+            return label, about, members[:3]
+    return f"{members[0]} cloud", f"Projects gathered around {members[0]}.", members[:3]
 
 
 def _cell(position: tuple[int, int]) -> tuple[int, int]:
@@ -474,7 +642,8 @@ def clouds(
     ``density`` is the crowding on a ``CLOUD_GRID``-square grid, row by row,
     scaled to 0..255 on a log curve so the core does not wash out everything
     else; the page draws it as haze. ``clouds`` names each dense neighborhood,
-    anchored at its members' centroid.
+    anchored at its members' centroid, with a line about it and its three
+    best-known members.
     """
     counts = [[0.0] * CLOUD_GRID for _ in range(CLOUD_GRID)]
     for i in range(ranked):
@@ -498,7 +667,7 @@ def clouds(
     for label, group in sorted(members.items(), key=lambda m: (-len(m[1]), m[1][0])):
         if len(group) < MIN_CLOUD:
             continue
-        name = _cloud_name([names[i] for i in group], used)
+        name, about, top = _cloud_name([names[i] for i in group], used)
         used.add(name)
         labels.append(label)
         found.append(
@@ -507,6 +676,8 @@ def clouds(
                 "x": round(sum(positions[i][0] for i in group) / len(group)),
                 "y": round(sum(positions[i][1] for i in group) / len(group)),
                 "projects": len(group),
+                "about": about,
+                "top": top,
             }
         )
     # Which named cloud each cell belongs to, counted from one; zero is none.
@@ -533,7 +704,13 @@ def clouds(
         "density": scaled,
         "clouds": found,
         "cells": cells,
-        "belt": {"name": BELT_NAME, "radius": round(0.475 * EXTENT)} if belt else None,
+        "belt": {
+            "name": BELT_NAME,
+            "about": BELT_ABOUT,
+            "radius": round(0.475 * EXTENT),
+        }
+        if belt
+        else None,
     }
 
 

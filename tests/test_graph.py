@@ -204,7 +204,7 @@ def test_write_graph_is_compact_json(
     graph.write_graph(payload, out)
     text = out.read_text(encoding="utf-8")
     assert json.loads(text) == payload
-    assert ", " not in text
+    assert '": ' not in text
 
 
 def test_an_unknown_snapshot_is_an_error(con_and_snapshot: ConAndSnapshot) -> None:
@@ -284,14 +284,20 @@ def test_edges_encode_as_degrees_and_gaps_and_decode_back() -> None:
 
 
 def test_dense_neighborhoods_become_named_clouds() -> None:
-    """A tight odoo family and a tight scientific stack, far apart."""
-    names = [f"odoo14-addon-{i}" for i in range(80)] + ["numpy"]
+    """A tight odoo family and a tight scientific stack, far apart.
+
+    zeep, ranked first, sits among the odoo add-ons; it is not one of them.
+    """
+    names = ["zeep"] + [f"odoo14-addon-{i}" for i in range(79)] + ["numpy"]
     names += [f"sci-{i}" for i in range(79)]
     positions = [(2000 + i % 9 * 10, 2000 + i // 9 * 10) for i in range(80)]
     positions += [(7000 + i % 9 * 10, 7000 + i // 9 * 10) for i in range(80)]
     sky = graph.clouds(names, positions, ranked=len(names))
     named = {cloud["name"] for cloud in sky["clouds"]}
-    assert named == {"the Oort Cloud", "the Numeric Nebula"}
+    assert named == {"Odoo Orbit", "Numeric Nebula"}
+    assert all(cloud["about"] for cloud in sky["clouds"])
+    odoo = next(c for c in sky["clouds"] if c["name"] == "Odoo Orbit")
+    assert odoo["top"] == ["odoo14-addon-0", "odoo14-addon-1", "odoo14-addon-2"]
     assert len(sky["density"]) == graph.CLOUD_GRID**2
     assert max(sky["density"]) == 255
 
@@ -300,7 +306,9 @@ def test_a_cloud_with_no_signature_is_named_for_its_best_known_project() -> None
     names = [f"widget-{i:03d}" for i in range(80)]
     positions = [(5000 + i % 9 * 10, 5000 + i // 9 * 10) for i in range(80)]
     sky = graph.clouds(names, positions, ranked=len(names))
-    assert [cloud["name"] for cloud in sky["clouds"]] == ["the widget-000 cloud"]
+    assert [cloud["name"] for cloud in sky["clouds"]] == ["widget-000 cloud"]
+    assert sky["clouds"][0]["about"] == "Projects gathered around widget-000."
+    assert sky["clouds"][0]["top"] == ["widget-000", "widget-001", "widget-002"]
 
 
 def test_a_sparse_sky_has_no_clouds() -> None:
@@ -313,7 +321,7 @@ def test_the_rim_band_is_named_only_when_occupied() -> None:
     inside = graph.clouds(["a"], [(center, center)], ranked=1)
     rim = graph.clouds(["a"], [(center, center + int(0.48 * graph.EXTENT))], ranked=1)
     assert inside["belt"] is None
-    assert rim["belt"]["name"] == "the Asteroid Belt"
+    assert rim["belt"]["name"] == "Kuiper Belt"
 
 
 def test_an_empty_sky_has_no_clouds() -> None:
@@ -364,6 +372,15 @@ def test_a_new_family_member_starts_beside_its_family() -> None:
     )
     family = (seeds[0][0] + seeds[1][0]) / 2
     assert abs(seeds[2][0] - family) < 1.0
+
+
+def test_a_new_pair_with_nothing_known_starts_in_the_middle() -> None:
+    """alpha and beta are new and only know each other: no neighbor to start by."""
+    names = ["numpy", "pandas", "alpha", "beta"]
+    layout_graph, _ = graph._layout_graph(names, [(1, 0), (3, 2)], [])  # noqa: SLF001
+    known = {0: (1000.0, 5000.0), 1: (1100.0, 5000.0)}
+    seeds = graph.seed_positions(layout_graph, [0, 1, 2, 3], 4, known)
+    assert seeds[2] == seeds[3] == (0.0, 0.0)
 
 
 def test_align_undoes_a_shift_as_well_as_a_turn() -> None:
