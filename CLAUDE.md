@@ -189,7 +189,18 @@ make install          # uv sync
 make lint             # ruff format --check, ruff check, ty check, biome ci
 make test             # coverage run -m pytest, coverage report, npm test
 prek run --all-files  # the git-hook gate; must pass on a clean clone
+make site             # render the committed data/ into site/
+make serve            # the same, served on :8000, re-rendered and reloaded on change
 ```
+
+`make serve` is `scripts/serve.py`, stdlib only: it polls the package and
+`data/`, re-renders through `make site` into a fresh directory under
+`build/serve/` (so `render.py` edits count too), and switches to it only once
+the render succeeds. Pages poll `/__build` and reload when it changes -- polled,
+not streamed, because a held connection per tab exhausts the browser's six per
+host. The reload script is added to pages as they are served, never written to
+disk, so it cannot reach Pages. `make site` passes `--graph` only when
+`data/graph.json` exists, as the workflows do.
 
 The suite differs by dependency group, and both arms run in CI:
 

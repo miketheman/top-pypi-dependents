@@ -1,4 +1,4 @@
-.PHONY: all clean install lint format test hooks
+.PHONY: all clean install lint format test hooks site serve
 
 INSTALL_STAMP := .install.stamp
 UV := $(shell command -v uv 2> /dev/null)
@@ -19,7 +19,7 @@ endif
 lint: $(INSTALL_STAMP)
 	@uv run ruff format --check
 	@uv run ruff check
-	@uv run ty check src tests
+	@uv run ty check src tests scripts
 	@biome ci
 
 format: $(INSTALL_STAMP)
@@ -33,3 +33,13 @@ test: $(INSTALL_STAMP)
 
 hooks:
 	@prek run --all-files
+
+# The graph is optional, as it is in the workflows: a month whose graph step
+# failed publishes the site without the cascade page.
+SITE_OUT ?= site
+site: $(INSTALL_STAMP)
+	@uv run top-pypi-dependents render --payload data/latest.json \
+		$(if $(wildcard data/graph.json),--graph data/graph.json) --output $(SITE_OUT)
+
+serve: $(INSTALL_STAMP)
+	@uv run python scripts/serve.py

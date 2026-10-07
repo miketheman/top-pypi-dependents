@@ -75,6 +75,8 @@ exercisable from a plain checkout with no credentials at all.
 make install   # uv sync
 make test      # coverage run + report, then the page scripts' node tests
 make lint      # ruff format --check, ruff check, ty check, biome ci
+make site      # render the committed data/ into site/
+make serve     # render, serve on localhost:8000, re-render and reload on change
 ```
 
 The pages' stylesheets and scripts live in `src/top_pypi_dependents/assets/`;

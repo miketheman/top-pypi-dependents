@@ -39,6 +39,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/*" = [
+    "INP001",   # standalone dev scripts, run by path; not a package
+]
 "tests/*" = [
     "INP001",   # tests/ is intentionally not a package (no __init__.py)
     "PLR2004",  # magic values are the point of a test
