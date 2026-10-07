@@ -13,13 +13,13 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=25000]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.3
+    rev: v0.16.10
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
   - repo: https://github.com/astral-sh/ty-pre-commit
-    rev: v0.0.72
+    rev: v0.0.85
     hooks:
       - id: ty
   - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
@@ -28,6 +28,6 @@ repos:
       - id: editorconfig-checker
         alias: ec
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.29.0
+    rev: v1.30.1
     hooks:
       - id: zizmor
