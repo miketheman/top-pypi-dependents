@@ -2,20 +2,20 @@
 name: Top PyPI Dependents
 description: A monthly ranking of the PyPI projects the rest of PyPI depends on.
 colors:
-  paper: "#f4f1ea"
-  ink: "#1c1a17"
-  ink-muted: "#5a554d"
-  ink-subtle: "#6b6559"
-  rule: "#d8d2c4"
-  surface-hover: "#e2d9c2"
-  accent: "#3f5a3a"
-  paper-dark: "#14130f"
-  ink-dark: "#ece7d9"
-  ink-muted-dark: "#a6a094"
-  ink-subtle-dark: "#90897d"
-  rule-dark: "#2d2b26"
-  surface-hover-dark: "#2b2721"
-  accent-dark: "#a2c087"
+  paper: "oklch(95.9% 0.01 87.5)"
+  ink: "oklch(21.9% 0.007 78.2)"
+  ink-muted: "oklch(45.2% 0.014 79.7)"
+  ink-subtle: "oklch(50.9% 0.02 84.6)"
+  rule: "oklch(86.5% 0.02 87.5)"
+  surface-hover: "oklch(88.6% 0.032 89.2)"
+  accent: "oklch(43.7% 0.061 140.6)"
+  paper-dark: "oklch(18.6% 0.008 95.5)"
+  ink-dark: "oklch(92.8% 0.019 90.5)"
+  ink-muted-dark: "oklch(70.7% 0.018 84.6)"
+  ink-subtle-dark: "oklch(63.3% 0.019 81.3)"
+  rule-dark: "oklch(28.9% 0.009 88.8)"
+  surface-hover-dark: "oklch(27.5% 0.012 78.1)"
+  accent-dark: "oklch(77.1% 0.085 130.7)"
 typography:
   display:
     fontFamily: "Petrona, ui-serif, Georgia, serif"
@@ -130,27 +130,39 @@ the light/dark boundary, so it reads as pigment rather than as a UI status color
 
 ### Primary
 
-- **Bottle Sage** (`#3f5a3a` light / `#a2c087` dark): the system's only chroma. It
+- **Bottle Sage** (`oklch(43.7% 0.061 140.6)` light / `oklch(77.1% 0.085 130.7)` dark; `#3f5a3a` / `#a2c087`): the system's only chroma. It
   has exactly three jobs — the leaf ornament, the focus ring, and the upward
   rank-change marker — plus the favicon, which is the ornament's leaf. In dark
   mode it lightens to a sage that holds the same role at the same rarity.
 
 ### Neutral
 
-- **Herbarium Paper** (`#f4f1ea` light / `#14130f` dark): the page ground. Warm and
+- **Herbarium Paper** (`oklch(95.9% 0.01 87.5)` light / `oklch(18.6% 0.008 95.5)` dark; `#f4f1ea` / `#14130f`): the page ground. Warm and
   slightly yellowed; the dark counterpart is a warm near-black, not a neutral gray.
-- **Iron Gall Ink** (`#1c1a17` light / `#ece7d9` dark): body text and every primary
+- **Iron Gall Ink** (`oklch(21.9% 0.007 78.2)` light / `oklch(92.8% 0.019 90.5)` dark; `#1c1a17` / `#ece7d9`): body text and every primary
   reading surface.
-- **Faded Ink** (`#5a554d` light / `#a6a094` dark): labels, nav links at rest,
+- **Faded Ink** (`oklch(45.2% 0.014 79.7)` light / `oklch(70.7% 0.018 84.6)` dark; `#5a554d` / `#a6a094`): labels, nav links at rest,
   column headers, lede paragraphs, and the rank-drop marker.
-- **Pencil** (`#6b6559` light / `#90897d` dark): the quietest text — footer meta,
+- **Pencil** (`oklch(50.9% 0.02 84.6)` light / `oklch(63.3% 0.019 81.3)` dark; `#6b6559` / `#90897d`): the quietest text — footer meta,
   rank numbers, placeholder text, and the "unchanged" and "new" markers.
-- **Hairline** (`#d8d2c4` light / `#2d2b26` dark): every rule, border, and divider
+- **Hairline** (`oklch(86.5% 0.02 87.5)` light / `oklch(28.9% 0.009 88.8)` dark; `#d8d2c4` / `#2d2b26`): every rule, border, and divider
   in the system, at 1px.
-- **Warm Tint** (`#e2d9c2` light / `#2b2721` dark): the only fill in the system.
+- **Warm Tint** (`oklch(88.6% 0.032 89.2)` light / `oklch(27.5% 0.012 78.1)` dark; `#e2d9c2` / `#2b2721`): the only fill in the system.
   Used for row and button hover, never as a resting background. It has to clear
   roughly 1.15:1 against paper to register at all, on a wide table whose only
   other row-tracking aid is a hairline.
+
+Tokens are written in oklch, which states lightness directly; each converts to the
+hex beside it exactly. Scripts that need a token's color read it back through a
+canvas rather than parsing the computed style, which keeps it in oklch.
+
+### Cascade tints
+
+The cascade page's cloud haze is the system's one exception to a single chroma, and
+it never appears outside that haze. Six tints share one lightness and one chroma
+(`oklch(60% 0.09 h)` light, `oklch(78% 0.08 h)` dark) so no cloud reads louder than
+another; only the hue turns, in steps of about 43 degrees, skipping the greens from
+100 to 190 that on that page mean a trace.
 
 ### Named Rules
 

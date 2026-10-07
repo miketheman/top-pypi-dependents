@@ -144,6 +144,11 @@ value in it must start with `./`, or the browser maps the import to nothing. Val
 script needs from the template travel as `data-` attributes. Biome lints and formats
 these files and nothing else -- `biome.json` scopes it away from `data/`.
 
+**Colors are oklch tokens, read through a canvas.** A color written in oklch computes
+to `oklch(...)`, so `cascade.js` gets each token's sRGB by painting it into a
+one-pixel canvas; parsing the computed style for digits would hand the shaders
+lightness and hue as if they were red and green.
+
 **The cascade page caches the still graph.** Edges and dots render into a multisampled
 offscreen target only when the view or selection changes; each frame copies it and
 draws only what moves. The copy goes through a resolved texture because a multisampled

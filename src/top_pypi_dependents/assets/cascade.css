@@ -1,3 +1,50 @@
+/* Nebula tints, for the cloud haze only. One lightness and one chroma, so no
+  cloud reads louder than another; only the hue turns, in steps of about 43
+  degrees, skipping the greens from 100 to 190 that on this page mean a
+  trace. Listed in the order clouds take them, each far from the last.
+  Lighter on the dark sheet, so they read as glow rather than stain. */
+:root {
+  --nebula-1: oklch(60% 0.09 301);
+  --nebula-2: oklch(60% 0.09 70);
+  --nebula-3: oklch(60% 0.09 215);
+  --nebula-4: oklch(60% 0.09 344);
+  --nebula-5: oklch(60% 0.09 258);
+  --nebula-6: oklch(60% 0.09 27);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --nebula-1: oklch(78% 0.08 301);
+    --nebula-2: oklch(78% 0.08 70);
+    --nebula-3: oklch(78% 0.08 215);
+    --nebula-4: oklch(78% 0.08 344);
+    --nebula-5: oklch(78% 0.08 258);
+    --nebula-6: oklch(78% 0.08 27);
+  }
+}
+
+/* The tints in hex, for a browser that predates oklch. */
+@supports not (color: oklch(0% 0 0)) {
+  :root {
+    --nebula-1: #8973ae;
+    --nebula-2: #a37640;
+    --nebula-3: #318ea2;
+    --nebula-4: #a66a8d;
+    --nebula-5: #5e81b6;
+    --nebula-6: #b06b63;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --nebula-1: #c0ace3;
+      --nebula-2: #d9af7f;
+      --nebula-3: #78c5d7;
+      --nebula-4: #dda3c4;
+      --nebula-5: #98b9eb;
+      --nebula-6: #e6a49c;
+    }
+  }
+}
+
 /* A workspace, not a document: the page is exactly one viewport tall and the
   graph takes everything the nav, the title and the footer line do not. The
   controls float over the graph rather than stacking above it, so none of

@@ -52,30 +52,24 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
 
   // Colors come from the page's own tokens, so the graph follows the theme.
   let colors;
+  // Any CSS color as sRGB channels in 0..1, read back through a one-pixel
+  // canvas. Not parsed from the computed style: a color written in oklch
+  // computes to `oklch(...)`, whose numbers a digit match would take for RGB.
+  const probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  probe.canvas.width = probe.canvas.height = 1;
+  function srgb(value) {
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = value.trim();
+    probe.fillRect(0, 0, 1, 1);
+    return [...probe.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((v) => v / 255);
+  }
   function readColors() {
     const style = getComputedStyle(document.documentElement);
-    const rgb = (name) => {
-      const probe = document.createElement("i");
-      probe.style.color = style.getPropertyValue(name);
-      document.body.append(probe);
-      const parts = getComputedStyle(probe)
-        .color.match(/[\d.]+/g)
-        .map(Number);
-      probe.remove();
-      return parts.slice(0, 3).map((v) => v / 255);
-    };
-    colors = { paper: rgb("--paper"), ink: rgb("--ink"), muted: rgb("--ink-muted"), accent: rgb("--accent") };
+    const token = (name) => srgb(style.getPropertyValue(name));
+    colors = { paper: token("--paper"), ink: token("--ink"), muted: token("--ink-muted"), accent: token("--accent") };
     colors.font = style.getPropertyValue("--sans");
     colors.serif = style.getPropertyValue("--serif");
-    // Nebula tints for the cloud haze only: dusty, low in chroma, and kept away
-    // from green, which on this page means a trace. Paler on the dark sheet so
-    // they read as glow rather than stain.
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    colors.nebula = (
-      dark
-        ? ["#b3a3e0", "#93b3db", "#e0a3b2", "#dcbb7a", "#df9e83", "#c9a8e3"]
-        : ["#7d6ba8", "#5e7fa8", "#b06f7f", "#b08a45", "#b0694f", "#9a78b5"]
-    ).map((hex) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255));
+    colors.nebula = [1, 2, 3, 4, 5, 6].map((n) => token(`--nebula-${n}`));
   }
   readColors();
   const css = (c, a = 1) => `rgba(${c.map((v) => Math.round(v * 255)).join()},${a})`;

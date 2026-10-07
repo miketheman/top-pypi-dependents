@@ -11,16 +11,16 @@
   color-scheme: light dark;
   scrollbar-color: var(--rule) transparent;
 
-  --paper: #f4f1ea;
-  --ink: #1c1a17;
-  --ink-muted: #5a554d;
-  --ink-subtle: #6b6559;
-  --rule: #d8d2c4;
+  --paper: oklch(95.9% 0.01 87.5);
+  --ink: oklch(21.9% 0.007 78.2);
+  --ink-muted: oklch(45.2% 0.014 79.7);
+  --ink-subtle: oklch(50.9% 0.02 84.6);
+  --rule: oklch(86.5% 0.02 87.5);
   /* Dark enough to register: on a wide table whose only other row-tracking
     aid is a hairline, a tint under 1.15:1 against paper is a hover state
     nobody can see. */
-  --surface-hover: #e2d9c2;
-  --accent: #3f5a3a;
+  --surface-hover: oklch(88.6% 0.032 89.2);
+  --accent: oklch(43.7% 0.061 140.6);
 
   --serif: Petrona, ui-serif, Georgia, serif;
   --sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
@@ -31,13 +31,38 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #14130f;
-    --ink: #ece7d9;
-    --ink-muted: #a6a094;
-    --ink-subtle: #90897d;
-    --rule: #2d2b26;
-    --surface-hover: #2b2721;
-    --accent: #a2c087;
+    --paper: oklch(18.6% 0.008 95.5);
+    --ink: oklch(92.8% 0.019 90.5);
+    --ink-muted: oklch(70.7% 0.018 84.6);
+    --ink-subtle: oklch(63.3% 0.019 81.3);
+    --rule: oklch(28.9% 0.009 88.8);
+    --surface-hover: oklch(27.5% 0.012 78.1);
+    --accent: oklch(77.1% 0.085 130.7);
+  }
+}
+
+/* The same colors in hex, for a browser that predates oklch: without this,
+  every token would be invalid there and the site would lose all its color. */
+@supports not (color: oklch(0% 0 0)) {
+  :root {
+    --paper: #f4f1ea;
+    --ink: #1c1a17;
+    --ink-muted: #5a554d;
+    --ink-subtle: #6b6559;
+    --rule: #d8d2c4;
+    --surface-hover: #e2d9c2;
+    --accent: #3f5a3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14130f;
+      --ink: #ece7d9;
+      --ink-muted: #a6a094;
+      --ink-subtle: #90897d;
+      --rule: #2d2b26;
+      --surface-hover: #2b2721;
+      --accent: #a2c087;
+    }
   }
 }
 
