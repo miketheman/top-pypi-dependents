@@ -130,11 +130,15 @@ nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem 1.5rem;
-  padding-bottom: 1rem;
+  /* Each link carries 0.4rem above and below, so a thumb has a 2rem target;
+    the nav gives the same back, keeping its rule and its top edge in place. */
+  margin-top: -0.4rem;
+  padding-bottom: 0.6rem;
   border-bottom: 1px solid var(--rule);
   margin-bottom: 3rem;
 }
 nav a {
+  padding-block: 0.4rem;
   text-decoration: none;
   font-size: clamp(0.75rem, 0.73rem + 0.1vw, 0.8125rem);
   font-weight: 500;
@@ -204,6 +208,12 @@ pre {
 }
 code {
   font-size: 0.9em;
+}
+/* An identifier in prose, like `counting.min_dependents`, is one unbreakable
+  word wider than a phone once text is enlarged. Blocks keep their lines and
+  scroll instead. */
+:not(pre) > code {
+  overflow-wrap: anywhere;
 }
 
 /* A code block is quoted material, so it gets the same hairline the rest of
@@ -382,7 +392,11 @@ tbody tr:hover {
   background: var(--surface-hover);
 }
 
+/* A name is the one cell that can give: without this, `typing-extensions`
+  and the Dependents head together push the table past a 320px screen. A
+  hyphen is the first place it breaks. */
 tbody td a {
+  overflow-wrap: anywhere;
   text-decoration: none;
   border-bottom: 1px solid var(--rule);
 }

@@ -59,7 +59,7 @@ body.app {
 }
 body.app nav {
   margin-bottom: 0.5rem;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.1rem;
 }
 body.app main {
   flex: 1;
@@ -237,6 +237,7 @@ body.app footer {
 /* Names in a list jump to that project. Buttons, because they act on the
   page; underlined like links, because that is how this site marks "go". */
 button.jump {
+  position: relative;
   padding: 0;
   font: inherit;
   color: inherit;
@@ -403,7 +404,8 @@ button.icon:hover {
     shown only on request, takes a row of its own rather than half of one. */
   .toggles {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* One column once enlarged text no longer fits two. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
   }
   #simulate-toggle {
     grid-column: 1 / -1;
@@ -422,6 +424,24 @@ button.icon:hover {
   .navigator canvas {
     display: none;
   }
+  /* Touch sizes: icon buttons a thumb can hit, and list names spaced so each
+    gets a taller hit area than the line it underlines, stopping short of
+    the next row's so the two never overlap. */
+  button.icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  .detail li {
+    margin-bottom: 0.6rem;
+  }
+  button.jump::after {
+    content: "";
+    position: absolute;
+    inset: -0.3rem 0;
+  }
+  .key summary {
+    padding-block: 0.4rem;
+  }
   .navigator {
     bottom: 0.5rem;
     right: 0.5rem;
@@ -436,6 +456,20 @@ button.icon:hover {
     display: none;
   }
   body.app footer p:not(:first-child) {
+    display: none;
+  }
+}
+
+/* A short phone -- any phone with its keyboard open -- has about 500px, and
+  the controls and the selection together left 90 of them for the graph.
+  While the reader is typing a name, the toggles and the selection step
+  aside; the field gives up focus on Enter, and both return. */
+@media (max-width: 44rem) and (max-height: 40rem) {
+  .detail {
+    max-height: 30%;
+  }
+  .controls:has(#find:focus) .toggles,
+  .stage:has(#find:focus) .detail {
     display: none;
   }
 }
