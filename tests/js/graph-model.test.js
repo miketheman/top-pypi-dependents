@@ -4,6 +4,7 @@ import {
   adjacency,
   bounds,
   cellIndex,
+  clears,
   cloudAt,
   cloudBounds,
   decodeEdges,
@@ -78,4 +79,16 @@ test("bounds boxes a set of points", () => {
     ]),
     [-1, 0, 3, 9],
   );
+});
+
+test("clears keeps a box's own row clearance when wider than the caller's", () => {
+  // A plain name and the selection's, both 40px wide at x = 100.
+  const plain = [100, 50, 40];
+  const selected = [100, 50, 40, 24];
+  // 16px below clears a plain name at the usual 15px rows, not the selection.
+  assert.equal(clears([plain], 100, 66, 40, 6, 15), true);
+  assert.equal(clears([selected], 100, 66, 40, 6, 15), false);
+  // Past the selection's 24px, or clear of it sideways, a name fits.
+  assert.equal(clears([selected], 100, 75, 40, 6, 15), true);
+  assert.equal(clears([selected], 150, 66, 40, 6, 15), true);
 });

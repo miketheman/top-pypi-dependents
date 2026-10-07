@@ -98,6 +98,12 @@ export function spreadCells(cells, size, passes) {
 
 // The cell, of `size` across `extent`, holding a data-space coordinate,
 // clamped to the grid.
+// Whether a label box [left, middle, width] at (x, y) crowds none of the boxes
+// already `taken`: `pad` apart sideways, `rows` apart up and down. A taken
+// box may carry a fourth value, its own row clearance, wider than the caller's.
+export const clears = (taken, x, y, w, pad, rows) =>
+  !taken.some((r) => x < r[0] + r[2] + pad && x + w + pad > r[0] && Math.abs(y - r[1]) < Math.max(rows, r[3] ?? 0));
+
 export const cellIndex = (v, extent, size) => Math.min(size - 1, Math.max(0, Math.floor((v / extent) * size)));
 
 // The cloud number of the cell holding a point in data space; zero is no cloud.

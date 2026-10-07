@@ -1,5 +1,15 @@
 import { canonical, fetchJson, fmt, plural, pypiLink } from "./format.js";
-import { adjacency, bounds, cellIndex, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from "./graph-model.js";
+import {
+  adjacency,
+  bounds,
+  cellIndex,
+  clears,
+  cloudAt,
+  cloudBounds,
+  decodeEdges,
+  reach,
+  spreadCells,
+} from "./graph-model.js";
 
 (() => {
   // Tuning. A hop is one step out along "is depended on by".
@@ -753,11 +763,9 @@ import { adjacency, bounds, cellIndex, cloudAt, cloudBounds, decodeEdges, reach,
   }
 
   // Label helpers. Every name on the graph is drawn over a paper halo, so it
-  // reads across lines and haze; `taken` holds the boxes already placed, as
-  // [left, middle, width], and a label that would crowd one is not drawn.
+  // reads across lines and haze; `taken` holds the boxes already placed, in
+  // the shape `clears` reads, and a label that would crowd one is not drawn.
   const onScreen = (sx, sy) => sx >= 0 && sy >= 0 && sx <= width && sy <= height;
-  const clears = (taken, x, y, w, pad, rows) =>
-    !taken.some((r) => x < r[0] + r[2] + pad && x + w + pad > r[0] && Math.abs(y - r[1]) < rows);
   function halo(text, x, y, lineWidth, ink, paper) {
     ctx.lineWidth = lineWidth;
     ctx.strokeStyle = paper;
@@ -796,7 +804,9 @@ import { adjacency, bounds, cellIndex, cloudAt, cloudBounds, decodeEdges, reach,
       const gap = dotPx(i) / 2 + 4;
       const x = sx + gap + w > width - 4 ? sx - gap - w : sx + gap;
       if (!strong && !clears(taken, x, sy, w, 6, 15)) return false;
-      taken.push([x, sy, w]);
+      // The selection's name keeps a clear line above and below it, so a
+      // neighbor's name never reads as part of it.
+      taken.push(strong ? [x, sy, w, 24] : [x, sy, w]);
       halo(names[i], x, sy, 3, css(strong ? colors.ink : colors.muted), css(colors.paper));
       return true;
     };
