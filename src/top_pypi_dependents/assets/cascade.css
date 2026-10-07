@@ -398,6 +398,16 @@ button.icon:hover {
   .controls .label {
     display: none;
   }
+  /* The four standing toggles do not fit one phone row; two even rows read
+    as a set where three and a stray fourth read as an accident. Simulate,
+    shown only on request, takes a row of its own rather than half of one. */
+  .toggles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  #simulate-toggle {
+    grid-column: 1 / -1;
+  }
   .ticker {
     display: none;
   }
