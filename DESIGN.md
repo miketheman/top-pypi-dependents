@@ -220,6 +220,11 @@ fallbacks, and the system is designed to hold up when they do.
 subhead, serif pull quote, or serif number would dissolve the contrast that makes
 the title land.
 
+The cascade page's map names are the one exception, and they stay on the canvas: the
+clouds and the rim belt are named in italic Petrona, the way a chart sets place names
+apart from everything else on it. They name regions, never projects, so the serif
+still never labels a thing a reader can select.
+
 **The Tracked-Caps Rule.** Letterspacing at 0.14em belongs to uppercase and only to
 uppercase. Never letterspace lowercase text.
 
