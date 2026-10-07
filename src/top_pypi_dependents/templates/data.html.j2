@@ -54,8 +54,9 @@ every node's number of dependencies in <code>degree</code>, then in <code>gaps</
 the differences between that node's sorted dependency indices, counted from zero;
 <code>extra_edges</code> holds the pairs declared only behind an extra.
 <code>sky</code> carries the clouds: a density grid of where runtime-ranked projects
-crowd, row by row on a 0&ndash;255 scale, and the name and anchor of each dense
-neighborhood.</p>
+crowd, row by row on a 0&ndash;255 scale, and the name, anchor, description and
+best-known members of each dense neighborhood. <code>extras_sky</code> is the same,
+found over every drawn project, for when extras are switched on.</p>
 {% endif %}
 
 <h3>What the JSON looks like</h3>

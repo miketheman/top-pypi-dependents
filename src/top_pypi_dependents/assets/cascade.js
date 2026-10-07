@@ -333,6 +333,9 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
 
   function setMode(on) {
     extras = on;
+    sky = (extras && graph.extras_sky) || graph.sky;
+    paintSky();
+    listClouds();
     [down, downStart] = adjacency(edgeSet, count, extras, 1, 0);
     [up, upStart] = adjacency(edgeSet, count, extras, 0, 1);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.size);
@@ -390,7 +393,9 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   // Each cell of the cloud grid in its cloud's tint, and the rest in plain
   // muted ink; smooth filtering blends the seams. Repainted with the theme.
   let skyCells = null;
-  // The sky the page draws, uploaded by paintSky.
+  // The sky the current mode draws: extras bring whole neighborhoods with
+  // them -- type stubs, boto3's stubs -- so with extras on, the crowds are
+  // found again over every drawn project.
   let sky = null;
   function paintSky() {
     if (!buffers.sky || !sky) return;
@@ -1450,9 +1455,6 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       resize();
       fit();
       setMode(extrasToggle.checked);
-      sky = graph.sky;
-      paintSky();
-      listClouds();
       statusLine.classList.add("sr-only");
       // Motion by default only for readers who have not asked for less of it.
       // Simulated releases stand in for a live feed that does not exist yet,

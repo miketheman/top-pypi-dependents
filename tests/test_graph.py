@@ -51,6 +51,17 @@ def test_projects_ranked_only_with_extras_come_last(
     assert payload["names"][payload["ranked"] :] == ["pytest"]
 
 
+def test_the_extras_sky_counts_every_drawn_project(
+    con_and_snapshot: ConAndSnapshot,
+) -> None:
+    con, snapshot_id = con_and_snapshot
+    payload = graph.build_graph(con, snapshot_id, min_dependents=1)
+    names = payload["names"]
+    positions = list(zip(payload["x"], payload["y"], strict=True))
+    assert payload["sky"] == graph.clouds(names, positions, ranked=payload["ranked"])
+    assert payload["extras_sky"] == graph.clouds(names, positions, ranked=len(names))
+
+
 def _snapshot(declarations: list[tuple[str, str, bool]]) -> ConAndSnapshot:
     """A hand-built snapshot: every project live, these dependencies declared."""
     con = warehouse.connect(None)

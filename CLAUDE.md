@@ -194,8 +194,8 @@ prek run --all-files  # the git-hook gate; must pass on a clean clone
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 210 passed, 3 skipped
-uv sync --group bigquery       # 213 passed, 0 skipped
+uv sync                        # 211 passed, 3 skipped
+uv sync --group bigquery       # 214 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the

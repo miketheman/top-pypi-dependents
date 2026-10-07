@@ -523,6 +523,32 @@ _CLOUD_NAMES: tuple[tuple[str, str, str, str], ...] = (
         "Small Magellanic Cloud",
         "A satellite of the Agent Nebula: projects built on Pydantic AI.",
     ),
+    # These crowd together only once extras are drawn, and come last so a
+    # runtime cloud that happens to hold one of them keeps its own name.
+    (
+        "project",
+        "pymdown-extensions",
+        "Material Moonlets",
+        "Markdown extensions and plugins for MkDocs Material.",
+    ),
+    (
+        "project",
+        "boto3-stubs",
+        "Stub Satellites",
+        "Type stubs for boto3, one package per AWS service.",
+    ),
+    (
+        "project",
+        "tifffile",
+        "Pixel Pulsar",
+        "Scientific imaging and plotting, around tifffile and pyqtgraph.",
+    ),
+    (
+        "project",
+        "pennylane",
+        "Qubit Quarry",
+        "Quantum computing beyond Qiskit: PennyLane, pytket and their kin.",
+    ),
 )
 # The band around the rim, where projects with nothing to be pulled toward sit.
 BELT_NAME = "Kuiper Belt"
@@ -804,6 +830,9 @@ def build_graph(
         "x": [x for x, _ in positions],
         "y": [y for _, y in positions],
         "sky": clouds(names, positions, ranked=ranked),
+        # Extras bring whole neighborhoods with them -- type stubs, boto3's
+        # stubs -- so the page finds the crowds again over every drawn node.
+        "extras_sky": clouds(names, positions, ranked=len(names)),
         "edges": encode_edges(edges, len(names)),
         "extra_edges": encode_edges(extra_edges, len(names)),
     }
