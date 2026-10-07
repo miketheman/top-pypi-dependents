@@ -8,12 +8,17 @@ from PyPI's own BigQuery metadata table.
 - Ranked JSON: <https://miketheman.github.io/top-pypi-dependents/latest.json> to
   read, or [`latest.min.json`](https://miketheman.github.io/top-pypi-dependents/latest.min.json)
   to fetch — same payload, published by the same monthly run
+- Dependency cascade: <https://miketheman.github.io/top-pypi-dependents/cascade.html>,
+  every ranked project drawn as one graph, with each project's dependencies and
+  dependents traceable from it
 - Full dependency graph: a DuckDB database and a Parquet edge list on each
   [release](https://github.com/miketheman/top-pypi-dependents/releases)
 
 `data/latest.json` is also committed each month, but it exists to give the next
-run something to compute rank movement against. Prefer the published URLs above:
-they are not tied to the commit history.
+run something to compute rank movement against. `data/graph.json`, the laid-out
+graph the cascade page draws, is committed beside it so a template change can
+re-render the site without the database. Prefer the published URLs above: they
+are not tied to the commit history.
 
 This is repo-only tooling. It is not published to PyPI.
 
@@ -27,6 +32,8 @@ This is repo-only tooling. It is not published to PyPI.
   reported alongside but not ranked on. The split exists because roughly 37% of all
   declared dependency edges are extras-gated; without it, pytest, ruff, black, and
   mypy would outrank numpy and requests.
+- **No project is its own dependent.** `foo[all]` requiring `foo[x]` is how extras
+  compose, not a dependent; self-references are not counted.
 - **PEP 503 normalization.** Every project name is canonicalized before comparison,
   so `Django`/`django` and `zope.interface`/`zope-interface` are the same project.
 - **Only live projects count.** Both as ranked targets and as dependents. The source
@@ -48,16 +55,17 @@ This is repo-only tooling. It is not published to PyPI.
 
 ## Pipeline
 
-Four subcommands, each independently runnable:
+Five subcommands, each independently runnable:
 
 | command | needs GCP credentials | reads | writes |
 | --- | --- | --- | --- |
 | `extract` | yes | BigQuery, `pypi.org/simple/` | winner/audit JSONL |
 | `build` | no | extracted data | a DuckDB database |
 | `artifacts` | no | the database | `data/latest.json`, an edge export |
-| `render` | no | `data/latest.json` | a static site, including both JSON copies |
+| `graph` | no | the database | `data/graph.json`, the laid-out graph |
+| `render` | no | `data/latest.json`, optionally `data/graph.json` | a static site, including both JSON copies |
 
-Only `extract` touches BigQuery. `build`, `artifacts`, and `render` run against
+Only `extract` touches BigQuery. `build`, `artifacts`, `graph`, and `render` run against
 either extracted data or checked-in test fixtures, so most of the pipeline is
 exercisable from a plain checkout with no credentials at all.
 
@@ -78,11 +86,16 @@ uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duc
   --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb --output build/latest.json \
   --limit 20 --min-dependents 1
-uv run top-pypi-dependents render --payload build/latest.json --output site --rows 20
+uv run top-pypi-dependents graph --database build/dev.duckdb --output build/graph.json \
+  --min-dependents 1
+uv run top-pypi-dependents render --payload build/latest.json --graph build/graph.json \
+  --output site --rows 20
 ```
 
 `render` writes `index.html` (the ranking), `data.html` (the method, the limits and
-the query examples), both JSON copies, and `search-index.json`. `--rows` is how
+the query examples), both JSON copies, and `search-index.json`. With `--graph` it
+also writes `cascade.html` and the `graph.json` it draws, and refuses a graph built
+from a different snapshot than the payload. `--rows` is how
 many ranked projects the ranked page lists, all of them visible.
 
 Searching looks past the page. It lists a thousand projects; `search-index.json`

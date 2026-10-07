@@ -44,6 +44,13 @@ full dependency graph &mdash; every declared edge, not just the ranked totals.</
 <a href="latest.min.json">latest.min.json</a> to fetch. Both hold the same payload.
 The complete dependency graph is published as a DuckDB database and a Parquet edge list
 on each <a href="https://github.com/miketheman/top-pypi-dependents/releases" target="_blank" rel="noopener" aria-describedby="new-tab">release</a>.</p>
+{% if has_cascade %}
+<p>The <a href="cascade.html">cascade page</a> draws <a href="graph.json">graph.json</a>:
+every project with enough dependents to be drawn, laid out, and the dependencies
+between them. Its nodes are parallel arrays in runtime rank order and its edges flat
+pairs of node indices, dependent first; <code>extra_edges</code> holds the pairs
+declared only behind an extra.</p>
+{% endif %}
 
 <h3>What the JSON looks like</h3>
 <p>The shape below is generated from the payload this page was built from, so it cannot

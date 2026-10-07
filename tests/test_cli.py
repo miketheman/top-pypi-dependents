@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from top_pypi_dependents import warehouse
 from top_pypi_dependents.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -65,6 +66,105 @@ def test_end_to_end_from_fixture(tmp_path: Path) -> None:
     assert payload["rows"][0]["project"] == "requests"
     assert (site / "index.html").exists()
     assert (build_dir / "edges.parquet").exists()
+
+
+def test_graph_feeds_the_cascade_page(tmp_path: Path) -> None:
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    out_json = tmp_path / "data" / "latest.json"
+    graph_json = tmp_path / "data" / "graph.json"
+    site = tmp_path / "site"
+    main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED])
+    main(["artifacts", "--database", str(db), "--output", str(out_json)])
+
+    assert (
+        main(
+            [
+                "graph",
+                "--database",
+                str(db),
+                "--output",
+                str(graph_json),
+                "--min-dependents",
+                "1",
+            ]
+        )
+        == 0
+    )
+    names = json.loads(graph_json.read_text(encoding="utf-8"))["names"]
+    assert names == ["requests", "django", "urllib3", "pytest"]
+
+    assert (
+        main(
+            [
+                "render",
+                "--payload",
+                str(out_json),
+                "--output",
+                str(site),
+                "--graph",
+                str(graph_json),
+            ]
+        )
+        == 0
+    )
+    assert (site / "cascade.html").exists()
+    assert (site / "graph.json").exists()
+
+
+def test_graph_on_an_empty_database_exits(tmp_path: Path) -> None:
+    db = tmp_path / "empty.duckdb"
+    con = warehouse.connect(db)
+    warehouse.create_schema(con)
+    con.close()
+    with pytest.raises(SystemExit, match="no snapshots"):
+        main(["graph", "--database", str(db)])
+
+
+def test_render_with_a_missing_graph_exits_before_writing(tmp_path: Path) -> None:
+    payload = tmp_path / "latest.json"
+    payload.write_text(
+        '{"generated_at": "2026-09-01T00:00:00+00:00", "rows": []}', encoding="utf-8"
+    )
+    site = tmp_path / "site"
+    with pytest.raises(SystemExit, match="run `graph` first"):
+        main(
+            [
+                "render",
+                "--payload",
+                str(payload),
+                "--output",
+                str(site),
+                "--graph",
+                str(tmp_path / "graph.json"),
+            ]
+        )
+    assert not site.exists()
+
+
+def test_render_refuses_a_graph_from_another_snapshot(tmp_path: Path) -> None:
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    out_json = tmp_path / "latest.json"
+    graph_json = tmp_path / "graph.json"
+    main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED])
+    main(["artifacts", "--database", str(db), "--output", str(out_json)])
+    graph_json.write_text(
+        '{"generated_at": "2026-08-01T00:00:00+00:00", "min_dependents": 2}',
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="rebuild it with `graph`"):
+        main(
+            [
+                "render",
+                "--payload",
+                str(out_json),
+                "--output",
+                str(tmp_path / "site"),
+                "--graph",
+                str(graph_json),
+            ]
+        )
 
 
 def test_build_prints_a_one_line_summary(

@@ -91,11 +91,19 @@ jobs:
             --database build/dependents.duckdb \
             --output data/latest.json \
             --edges "build/edges-${MONTH}.parquet"
+          # Before the rename below: `graph` reads the database by its default
+          # name. Committed beside data/latest.json so `site.yml` can render
+          # the cascade page without the database.
+          uv run top-pypi-dependents graph \
+            --database build/dependents.duckdb \
+            --output data/graph.json
           mv build/dependents.duckdb "build/dependents-${MONTH}.duckdb"
 
       - name: Render
         if: inputs.dry_run != true
-        run: uv run top-pypi-dependents render --payload data/latest.json --output site
+        run: |
+          uv run top-pypi-dependents render --payload data/latest.json \
+            --graph data/graph.json --output site
 
       - name: Commit the ranked JSON
         if: inputs.dry_run != true
@@ -104,11 +112,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # data/latest.json starts each run untracked or unchanged; `git diff`
+          # The data files start each run untracked or unchanged; `git diff`
           # against the worktree can't see either case, so stage first and
           # test the index instead.
-          git add data/latest.json
-          if git diff --cached --quiet -- data/latest.json; then
+          git add data/latest.json data/graph.json
+          if git diff --cached --quiet -- data/latest.json data/graph.json; then
             echo "No ranking change; nothing to commit."
           else
             git commit -m "Refresh rankings for ${MONTH}"

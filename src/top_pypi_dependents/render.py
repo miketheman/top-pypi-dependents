@@ -102,17 +102,39 @@ def _environment() -> Environment:
     )
 
 
+class StaleGraphError(ValueError):
+    """The graph was built from a different snapshot than the payload."""
+
+
 def render_site(
     payload: dict[str, Any],
     out_dir: Path,
     *,
     rows: int = ROWS,
+    graph: Path | None = None,
 ) -> None:
     """Write both pages, both JSON copies and the search index into ``out_dir``.
 
     ``rows`` is how many ranked projects the page lists; the search index
-    covers the rest.
+    covers the rest. With a ``graph`` file, the cascade page is rendered too.
+
+    The graph is read and checked before anything is written. One built from
+    another month's snapshot would otherwise be published under this month's
+    footer, with last month's ranks and counts.
     """
+    graph_bytes = graph.read_bytes() if graph is not None else None
+    graph_data = json.loads(graph_bytes) if graph_bytes is not None else None
+    if (
+        graph_data is not None
+        and graph_data.get("generated_at") != payload["generated_at"]
+    ):
+        msg = (
+            f"{graph} was generated at {graph_data.get('generated_at')}, but the "
+            f"payload at {payload['generated_at']}; rebuild it with `graph` from "
+            f"the same database"
+        )
+        raise StaleGraphError(msg)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _environment()
     shared = {
@@ -131,6 +153,7 @@ def render_site(
         # the next run.
         "asset_month": _asset_month(payload["generated_at"]),
         "payload_shape": _payload_shape(payload),
+        "has_cascade": graph_data is not None,
     }
 
     # Served from Pages rather than linked out of the git repository: a raw-git
@@ -155,6 +178,22 @@ def render_site(
         env.get_template("data.html.j2").render(page="data", **shared),
         encoding="utf-8",
     )
+
+    if graph_bytes is not None and graph_data is not None:
+        # Copied verbatim: `graph` already wrote it compact, and the page is
+        # what reads it.
+        (out_dir / "graph.json").write_bytes(graph_bytes)
+        (out_dir / "cascade.html").write_text(
+            env.get_template("cascade.html.j2").render(
+                page="cascade",
+                # The graph's own threshold, which can differ from the
+                # ranking's and counts extras: the drawn set is every project
+                # that clears it once extras count.
+                graph_min_dependents=graph_data["min_dependents"],
+                **shared,
+            ),
+            encoding="utf-8",
+        )
 
     # The ranking is the root: it is what the site is for, and a visitor who
     # lands on prose has to take a second step to reach the thing they came for.

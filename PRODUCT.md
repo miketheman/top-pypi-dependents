@@ -58,13 +58,15 @@ method statement without doing the same work.
 - Unattended monthly GitHub Actions run (`17 4 2 * *`) reads PyPI's BigQuery
   metadata table and republishes everything. No human is in the loop on a
   normal month.
-- Three published outputs: a static site on GitHub Pages, `latest.json` /
+- Three published outputs: a static site on GitHub Pages (the ranking, the
+  method, and the cascade page with the `graph.json` it draws), `latest.json` /
   `latest.min.json` at stable URLs, and a dated GitHub Release carrying a
   DuckDB database plus a Parquet edge export.
 - Readers arrive by link or from GitHub, usually already holding a question.
   Data consumers may hit only the JSON URL or the release assets.
-- The graph is queried in a DuckDB CLI, not in the browser. The site teaches
-  that query rather than trying to be the query tool.
+- The full graph is queried in a DuckDB CLI, not in the browser. The site
+  teaches that query rather than trying to be the query tool; the cascade page
+  draws only the ranked slice, for seeing shape and tracing one project.
 
 ## Capabilities and Constraints
 

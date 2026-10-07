@@ -1,0 +1,1276 @@
+{% extends "base.html.j2" %}
+{% block title %}Dependency cascade · Top PyPI Dependents{% endblock %}
+{% block description %}Every ranked PyPI project as one graph. A release lights up the projects that depend on it, and the projects that depend on those.{% endblock %}
+{% block body_attrs %} class="app"{% endblock %}
+{% block style %}
+  /* A workspace, not a document: the page is exactly one viewport tall and the
+    graph takes everything the nav, the title and the footer line do not. The
+    controls float over the graph rather than stacking above it, so none of
+    the reader's screen goes to chrome they are not using. `dvh`, so a phone's
+    collapsing URL bar does not push the bottom of the graph out of reach. */
+  body.app {
+    max-width: none;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 1rem 0;
+  }
+  body.app nav { margin-bottom: 0.5rem; padding-bottom: 0.5rem; }
+  body.app main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  body.app footer { margin-top: 0; padding: 0.4rem 0; border-top: 0; }
+  body.app footer p { display: inline; margin: 0 1rem 0 0; }
+
+  .app-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 1rem;
+    margin-bottom: 0.5rem;
+  }
+  .app-head h1 { font-size: clamp(1.375rem, 1.2rem + 0.8vw, 1.75rem); margin: 0; }
+  .app-head p { margin: 0; max-width: none; color: var(--ink-muted); }
+
+  .stage {
+    position: relative;
+    flex: 1;
+    min-height: 22rem;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .surface { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+  .surface.dragging { cursor: grabbing; }
+  .surface canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* Panels sit over the graph. Paper at nearly full strength, so text on them
+    stays legible over the densest part of the drawing; a hairline, never a
+    shadow. */
+  .panel {
+    position: absolute;
+    z-index: 2;
+    background: color-mix(in srgb, var(--paper) 94%, transparent);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 0.75rem;
+  }
+  .panel p { margin: 0; }
+
+  .controls { top: 0.75rem; left: 0.75rem; width: min(19rem, calc(100% - 1.5rem)); }
+  .controls input[type="search"] { margin: 0; max-width: none; padding: 0.55rem 0.75rem; }
+  .controls .label { margin-bottom: 0.35rem; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 0 1.25rem; margin-top: 0.35rem; }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  .toggle input { accent-color: var(--accent); width: 1rem; height: 1rem; margin: 0; }
+  .toggle:has(input:disabled) { color: var(--ink-subtle); cursor: default; }
+  /* `display` above would otherwise override the hidden attribute. */
+  .toggle[hidden] { display: none; }
+  .controls .note { margin: 0.5rem 0 0; font-size: 0.8125rem; }
+  .ticker { list-style: none; padding: 0; margin: 0.4rem 0 0; max-width: none; }
+  .ticker li { margin: 0; font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .detail {
+    top: 0.75rem;
+    right: 0.75rem;
+    width: min(20rem, calc(100% - 1.5rem));
+    max-height: calc(100% - 13rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .detail-head { display: flex; align-items: start; justify-content: space-between; gap: 0.5rem; }
+  .detail-head a { font-size: 1.125rem; font-weight: 500; overflow-wrap: anywhere; }
+  .detail .meta { margin-top: 0.35rem; }
+  .detail h2 { margin: 1rem 0 0.4rem; }
+  .detail ol { list-style: none; padding: 0; margin: 0; max-width: none; }
+  .detail li { margin: 0 0 0.15rem; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+  .detail li .meta { margin: 0 0 0 0.4rem; }
+  .detail input[type="search"] { margin: 0 0 0.5rem; padding: 0.4rem 0.6rem; max-width: none; }
+
+  /* Names in a list jump to that project. Buttons, because they act on the
+    page; underlined like links, because that is how this site marks "go". */
+  button.jump {
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    text-align: left;
+  }
+  button.jump:hover { border-bottom-color: var(--ink-muted); }
+
+  button.icon {
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    font: inherit;
+    font-size: 1.125rem;
+    line-height: 1;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--ink-subtle);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: border-color var(--dur) var(--ease);
+  }
+  button.icon:hover { border-color: var(--ink); }
+
+  .key { bottom: 0.75rem; left: 0.75rem; max-width: min(22rem, calc(100% - 1.5rem)); padding: 0.5rem 0.75rem; }
+  .key summary { cursor: pointer; font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted); }
+  .key ul { list-style: none; padding: 0; margin: 0.5rem 0 0; max-width: none; }
+  .key li { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.3rem; }
+  .key svg { flex: none; }
+  .key p { margin-top: 0.5rem; font-size: 0.8125rem; color: var(--ink-muted); }
+
+  /* Where am I: the whole graph in miniature, with the visible part outlined.
+    Zooming far into a cluster is where readers get lost, and this is the way
+    back that does not throw away where they were. */
+  .navigator { bottom: 0.75rem; right: 0.75rem; display: flex; align-items: end; gap: 0.5rem; padding: 0.5rem; }
+  .navigator canvas { width: 8.5rem; height: 8.5rem; display: block; cursor: crosshair; touch-action: none; }
+  .zoom { display: flex; flex-direction: column; gap: 0.35rem; }
+
+  .tip {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+    padding: 0.4rem 0.6rem;
+    background: var(--paper);
+    border: 1px solid var(--ink-subtle);
+    border-radius: 2px;
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    white-space: nowrap;
+  }
+  .tip strong { font-weight: 500; }
+  .tip span { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--ink-muted); }
+
+  /* Narrow: the selection becomes a sheet along the bottom, and the key and
+    the navigator step aside for it. Pinch does what the zoom buttons do. */
+  @media (max-width: 44rem) {
+    body.app { padding: 0.5rem 0.5rem 0; }
+    .app-head p { display: none; }
+    .controls { top: 0.5rem; left: 0.5rem; width: calc(100% - 1rem); padding: 0.5rem 0.6rem; }
+    .controls .label { display: none; }
+    .ticker { display: none; }
+    .detail {
+      top: auto;
+      bottom: 0.5rem;
+      left: 0.5rem;
+      right: 0.5rem;
+      width: auto;
+      max-height: 38%;
+    }
+    .navigator canvas { display: none; }
+    .navigator { bottom: 0.5rem; right: 0.5rem; padding: 0.35rem; }
+    .key { bottom: 0.5rem; left: 0.5rem; }
+    .stage:has(.detail:not([hidden])) .key,
+    .stage:has(.detail:not([hidden])) .navigator { display: none; }
+    body.app footer p:not(:first-child) { display: none; }
+  }
+{% endblock %}
+{% block content %}
+<header class="app-head">
+  <h1>Dependency cascade</h1>
+  <p>Every ranked project and the dependencies between them. Click a project to trace what it depends on and what depends on it.</p>
+</header>
+
+<div class="stage" id="stage">
+  <div class="surface" id="surface" tabindex="0" role="application"
+    aria-label="Dependency graph. Arrow keys pan, plus and minus zoom, 0 shows the whole graph. Use the search field to find a project and trace it."
+    aria-describedby="status">
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <canvas id="labels" aria-hidden="true"></canvas>
+  </div>
+  <p class="loading" id="status" role="status">Loading the graph…</p>
+  <div class="tip" id="tip" hidden></div>
+
+  <div class="panel controls">
+    <label class="label" for="find">Find a project</label>
+    <input id="find" type="search" placeholder="Find a project" autocomplete="off"
+      enterkeyhint="go" aria-describedby="find-note">
+    <div class="toggles">
+      <label class="toggle"><input id="extras" type="checkbox"> Include extras</label>
+      <label class="toggle"><input id="animate" type="checkbox"> Animate</label>
+      <label class="toggle" id="simulate-toggle" hidden><input id="simulate" type="checkbox"> Simulate releases</label>
+    </div>
+    <p class="note" id="find-note" hidden></p>
+    <ol class="ticker" id="releases" aria-label="Simulated releases"></ol>
+  </div>
+
+  <section class="panel detail" id="detail" aria-labelledby="detail-name" hidden></section>
+
+  <details class="panel key" id="key" open>
+    <summary>Key</summary>
+    <ul class="meta">
+      <li><svg width="36" height="8" aria-hidden="true"><defs><linearGradient id="lg-dir" gradientUnits="userSpaceOnUse" x1="0" x2="32" y1="0" y2="0"><stop offset="0" stop-color="currentColor" stop-opacity="0.1"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><path d="M0 4h32" stroke="url(#lg-dir)" stroke-width="1.5"/><circle cx="32" cy="4" r="3" fill="currentColor"/></svg>Strengthens toward the project depended on</li>
+      <li><svg width="36" height="8" aria-hidden="true"><path d="M0 4h36" style="stroke: var(--accent)" stroke-width="2"/></svg>Depends on the selection</li>
+      <li><svg width="36" height="8" aria-hidden="true"><path d="M0 4h36" style="stroke: var(--ink)" stroke-width="2" stroke-dasharray="4 3"/></svg>The selection depends on it</li>
+    </ul>
+    <p>A dot's size is its dependent count. Only projects with at least {{ graph_min_dependents }} dependents are drawn (counting extras when they are switched on), so a trace reaches a project's drawn dependents, not every one: most of numpy's 95,000 are applications nothing else depends on. Projects that share a name prefix, like <code>odoo-*</code>, are drawn near each other. <a href="data.html">How it is counted</a>.</p>
+  </details>
+
+  <div class="panel navigator">
+    <canvas id="minimap" aria-hidden="true"></canvas>
+    <div class="zoom">
+      <button class="icon" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button class="icon" id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <button class="icon" id="zoom-fit" type="button" aria-label="Show the whole graph">⤢</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // Tuning. A hop is one step out along "is depended on by".
+  const HOP_MS = 220;
+  const GLOW_MS = 1400;
+  const MAX_DEPTH = 4;
+  const MAX_LIT = 6000;
+  const DECAY = 0.72;
+  const SIM_EVERY_MS = 2200;
+  const LIST_LIMIT = 12;
+
+  const $ = (id) => document.getElementById(id);
+  const surface = $("surface");
+  const canvas = $("gl");
+  const labels = $("labels");
+  const ctx = labels.getContext("2d");
+  const minimap = $("minimap");
+  const mctx = minimap.getContext("2d");
+  const tip = $("tip");
+  const statusLine = $("status");
+  const detail = $("detail");
+  const releases = $("releases");
+  const find = $("find");
+  const findNote = $("find-note");
+  const simulate = $("simulate");
+  const extrasToggle = $("extras");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  // Everything that moves -- a trace's pulses, a release's glow, simulated
+  // releases -- answers to this one switch. Off leaves the trace drawn still:
+  // a hub like requests lights thousands of lines, and pulsing all of them is
+  // more than some readers want. It starts off for anyone who asked their
+  // system for less motion.
+  const animate = $("animate");
+  animate.checked = !reduceMotion.matches;
+  const moving = () => animate.checked;
+  const narrow = matchMedia("(max-width: 44rem)");
+
+  if (narrow.matches) $("key").open = false;
+
+  // No antialiasing on the canvas itself: the still graph is drawn into a
+  // multisampled target, which does the smoothing.
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
+  if (!gl) {
+    statusLine.textContent = "This page needs WebGL 2, which this browser does not offer.";
+    return;
+  }
+
+  // Colors come from the page's own tokens, so the graph follows the theme.
+  let colors;
+  function readColors() {
+    const style = getComputedStyle(document.documentElement);
+    const rgb = (name) => {
+      const probe = document.createElement("i");
+      probe.style.color = style.getPropertyValue(name);
+      document.body.append(probe);
+      const parts = getComputedStyle(probe).color.match(/[\d.]+/g).map(Number);
+      probe.remove();
+      return parts.slice(0, 3).map((v) => v / 255);
+    };
+    colors = { paper: rgb("--paper"), ink: rgb("--ink"), muted: rgb("--ink-muted"), accent: rgb("--accent") };
+    colors.font = style.getPropertyValue("--sans");
+  }
+  readColors();
+  const css = (c, a = 1) => `rgba(${c.map((v) => Math.round(v * 255)).join()},${a})`;
+
+  function compile(vs, fs) {
+    const program = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, src);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+      gl.attachShader(program, shader);
+    }
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+    return program;
+  }
+
+  // Focus is one float per node and per edge: 0 is outside the selection's
+  // reach, a positive n is n hops downstream (a dependent), a negative n is n
+  // hops upstream (a dependency), and the selection itself is 0.5.
+  const VIEW = "uniform vec2 u_scale; uniform vec2 u_offset; uniform float u_focusing;";
+  const nodeProgram = compile(`#version 300 es
+    ${VIEW}
+    uniform float u_px; uniform float u_grow; uniform float u_pass;
+    in vec2 a_pos; in float a_size; in float a_heat; in float a_focus;
+    out float v_heat; out float v_focus; out float v_weight;
+    void main() {
+      // Depth orders the dots, since they are drawn in rank order and numpy
+      // would otherwise lie under everything drawn after it: bigger nearer,
+      // and anything on a trace nearer still.
+      float depth = 0.5 - min(a_size, 60.0) / 150.0 - (u_focusing > 0.5 && a_focus != 0.0 ? 1.0 : 0.0);
+      gl_Position = vec4(a_pos * u_scale + u_offset, depth, 1.0);
+      // A point size of zero is undefined in GLES and most drivers draw a pixel,
+      // so a hidden project is moved outside clip space instead.
+      float heat = u_pass > 0.5 ? a_heat : 0.0;
+      if (a_size == 0.0 || (u_pass > 0.5 && heat < 0.01)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      v_heat = heat;
+      v_focus = a_focus;
+      float grow = a_focus == 0.5 ? 6.0 : 0.0;
+      gl_PointSize = (a_size + u_grow + grow + heat * (4.0 + 0.5 * a_size)) * u_px;
+      v_weight = clamp((a_size - 1.4) / 8.0, 0.0, 1.0);
+    }`, `#version 300 es
+    // highp, to match the vertex shader: both read u_focusing, and a uniform
+    // shared across stages must agree on precision or the program fails.
+    precision highp float;
+    uniform vec3 u_base; uniform vec3 u_hot; uniform vec3 u_ink; uniform float u_focusing;
+    in float v_heat; in float v_focus; in float v_weight; out vec4 color;
+    void main() {
+      vec2 c = gl_PointCoord * 2.0 - 1.0;
+      float d = dot(c, c);
+      if (d > 1.0) discard;
+      float edge = 1.0 - smoothstep(0.7, 1.0, d);
+      // Hubs shade toward ink as well as growing, so they read as landmarks.
+      vec3 rgb = mix(u_base, u_ink, v_weight * 0.6);
+      // Small projects stay light, so forty thousand overlapping dots read as
+      // density rather than a solid disc; the hubs stand out of it.
+      float a = mix(0.28, 0.85, v_weight);
+      if (u_focusing > 0.5) {
+        if (v_focus == 0.0) { a = 0.08; }
+        else if (v_focus == 0.5) { rgb = u_ink; a = 1.0; }
+        else if (v_focus > 0.0) { rgb = u_hot; a = 0.95; }
+        else { rgb = u_ink; a = 0.9; }
+      }
+      rgb = mix(rgb, u_hot, v_heat);
+      a = max(a, v_heat) * edge;
+      color = vec4(rgb * a, a);
+    }`);
+
+  // Edges carry which end they are (0 the dependent, 1 the dependency), which
+  // is what draws direction: a line strengthens toward what is depended on.
+  // `a_kind` is 0 for an edge in the runtime graph and 1 for one that only
+  // exists once extras count.
+  const edgeProgram = compile(`#version 300 es
+    ${VIEW}
+    uniform float u_extras; uniform float u_pass;
+    in vec2 a_pos; in float a_end; in float a_focus; in float a_kind;
+    out float v_end; out float v_focus; out float v_shown; out float v_pass;
+    void main() {
+      gl_Position = vec4(a_pos * u_scale + u_offset, 0.0, 1.0);
+      v_end = a_end; v_focus = a_focus; v_pass = u_pass;
+      v_shown = (a_kind > 0.5 && u_extras < 0.5) || (u_pass > 0.5 && a_focus == 0.0) ? 0.0 : 1.0;
+    }`, `#version 300 es
+    precision highp float;
+    uniform vec3 u_ink; uniform vec3 u_hot; uniform float u_alpha; uniform float u_focusing;
+    uniform float u_time; uniform float u_traceAlpha;
+    in float v_end; in float v_focus; in float v_shown; in float v_pass; out vec4 color;
+    void main() {
+      if (v_shown < 0.5) discard;
+      float shade = mix(0.1, 1.0, v_end);
+      vec3 rgb = u_ink;
+      float a = u_alpha * shade;
+      if (u_focusing > 0.5) {
+        if (v_focus == 0.0) { a *= 0.05; }
+        else {
+          float depth = abs(v_focus);
+          rgb = v_focus > 0.0 ? u_hot : u_ink;
+          a = u_traceAlpha * mix(0.55, 0.9, shade) / (1.0 + 0.35 * (depth - 1.0));
+          // A pulse runs from the dependency to the dependent: the way a
+          // release travels. Upstream lines are dashed by the same pulse.
+          float pulse = fract(u_time + v_end);
+          if (v_pass > 0.5) a = smoothstep(0.82, 1.0, pulse) * 0.6;
+          else if (v_focus < 0.0) a *= step(0.35, fract(pulse * 3.0));
+        }
+      }
+      color = vec4(rgb * a, a);
+    }`);
+
+  // Copies the cached still graph to the screen: one triangle covering the
+  // viewport, sampling the resolved texture pixel for pixel.
+  const copyProgram = compile(`#version 300 es
+    void main() {
+      vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+      gl_Position = vec4(p, 0.0, 1.0);
+    }`, `#version 300 es
+    precision mediump float;
+    uniform sampler2D u_image;
+    out vec4 color;
+    void main() { color = texelFetch(u_image, ivec2(gl_FragCoord.xy), 0); }`);
+
+  const sparkProgram = compile(`#version 300 es
+    ${VIEW}
+    in vec2 a_pos; in float a_alpha;
+    out float v_alpha;
+    void main() { gl_Position = vec4(a_pos * u_scale + u_offset, 0.0, 1.0); v_alpha = a_alpha; }`, `#version 300 es
+    precision mediump float;
+    uniform vec3 u_hot;
+    in float v_alpha; out vec4 color;
+    void main() { color = vec4(u_hot * v_alpha, v_alpha); }`);
+
+  const loc = (program, names) => Object.fromEntries(names.map((n) =>
+    [n, n.startsWith("u_") ? gl.getUniformLocation(program, n) : gl.getAttribLocation(program, n)]));
+  const VIEW_NAMES = ["u_scale", "u_offset", "u_focusing"];
+  const nodeLoc = loc(nodeProgram, [...VIEW_NAMES, "u_px", "u_grow", "u_pass", "u_base", "u_hot", "u_ink", "a_pos", "a_size", "a_heat", "a_focus"]);
+  const edgeLoc = loc(edgeProgram, [...VIEW_NAMES, "u_extras", "u_pass", "u_ink", "u_hot", "u_alpha", "u_time", "u_traceAlpha", "a_pos", "a_end", "a_focus", "a_kind"]);
+  const sparkLoc = loc(sparkProgram, [...VIEW_NAMES, "u_hot", "a_pos", "a_alpha"]);
+
+  // Graph data. Nodes are in runtime rank order; the first `ranked` clear the
+  // minimum on runtime dependents, the rest only once extras count. `pairs`
+  // is every edge, runtime first, as dependent/dependency index pairs, and
+  // `kind[k]` is 1 for an edge that only exists with extras switched on.
+  let graph, count, ranked, edgeCount, names, pos, pairs, kind, byName, grid, orderAll;
+  let down, downStart, up, upStart;
+  let heat, nodeFocus, edgeFocus;
+  let extras = false;
+  const buffers = {};
+
+  const visible = (i) => extras || i < ranked;
+  const dependentsOf = (i) => (extras ? graph.dependents_all[i] : graph.dependents[i]);
+  // Dot diameter from the full dependent count, not the slice drawn here.
+  // Square root, so a dot's area tracks its count: numpy at 95,000 is a
+  // landmark of about 35px, a project with a handful barely a speck. A log
+  // scale drew both within a few pixels of each other.
+  const sizeOf = (i) => 1.4 + 0.11 * Math.sqrt(dependentsOf(i));
+  // Zooming in adds the same few pixels to every dot rather than multiplying
+  // them, so small projects become clickable without hubs swallowing the view.
+  const growth = () => (zoomGrowth() - 1) * 1.6;
+  const dotPx = (i) => sizeOf(i) + growth();
+
+  // Canonical form, as PyPI normalizes it, so "Django" and "ruamel.yaml" find
+  // what the graph stores.
+  const canonical = (s) => s.trim().toLowerCase().replace(/[-_.]+/g, "-");
+
+  // Adjacency over the edges the current mode shows, in CSR form, neighbors in
+  // rank order so a capped cascade keeps the best-known ones.
+  function adjacency(from, to) {
+    const start = new Uint32Array(count + 1);
+    for (let k = 0; k < edgeCount; k++) if (extras || !kind[k]) start[pairs[2 * k + from] + 1]++;
+    for (let i = 0; i < count; i++) start[i + 1] += start[i];
+    const list = new Uint32Array(start[count]);
+    const fill = start.slice(0, count);
+    for (let k = 0; k < edgeCount; k++) {
+      if (extras || !kind[k]) list[fill[pairs[2 * k + from]]++] = pairs[2 * k + to];
+    }
+    for (let i = 0; i < count; i++) list.subarray(start[i], start[i + 1]).sort();
+    return [list, start];
+  }
+
+  function buildIndexes(graph) {
+    names = graph.names;
+    count = names.length;
+    ranked = graph.ranked;
+    byName = new Map(names.map((n, i) => [n, i]));
+    pos = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) { pos[2 * i] = graph.x[i]; pos[2 * i + 1] = graph.y[i]; }
+    const runtime = graph.edges.length / 2;
+    edgeCount = runtime + graph.extra_edges.length / 2;
+    pairs = new Uint32Array(edgeCount * 2);
+    pairs.set(graph.edges);
+    pairs.set(graph.extra_edges, graph.edges.length);
+    // A runtime edge touching a project ranked only with extras is hidden
+    // with that project.
+    kind = new Uint8Array(edgeCount);
+    for (let k = 0; k < edgeCount; k++) {
+      kind[k] = k >= runtime || pairs[2 * k] >= ranked || pairs[2 * k + 1] >= ranked ? 1 : 0;
+    }
+    heat = new Float32Array(count);
+    nodeFocus = new Float32Array(count);
+    edgeFocus = new Float32Array(edgeCount * 2);
+    // Label priority with extras on: the count the dots are then sized by,
+    // ties broken by name, as the ranking breaks them.
+    orderAll = Uint32Array.from({ length: count }, (_, i) => i).sort((a, b) =>
+      graph.dependents_all[b] - graph.dependents_all[a] || (names[a] < names[b] ? -1 : 1));
+
+    // A coarse grid over data space, for finding the node under the pointer.
+    const cells = 128;
+    const cellSize = graph.extent / cells;
+    const buckets = Array.from({ length: cells * cells }, () => []);
+    const cellOf = (v) => Math.min(cells - 1, Math.max(0, Math.floor(v / cellSize)));
+    for (let i = 0; i < count; i++) buckets[cellOf(pos[2 * i + 1]) * cells + cellOf(pos[2 * i])].push(i);
+    grid = { cells, buckets, cellOf };
+  }
+
+  function setMode(on) {
+    extras = on;
+    [down, downStart] = adjacency(1, 0);
+    [up, upStart] = adjacency(0, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.size);
+    gl.bufferData(gl.ARRAY_BUFFER, Float32Array.from({ length: count }, (_, i) => (visible(i) ? sizeOf(i) : 0)), gl.STATIC_DRAW);
+    if (selected >= 0 && !visible(selected)) selected = -1;
+    select(selected, { quiet: true });
+    renderMinimapBase();
+    let lines = 0;
+    for (let k = 0; k < edgeCount; k++) if (extras || !kind[k]) lines++;
+    statusLine.textContent = `${fmt(extras ? count : ranked)} projects and ${fmt(lines)} dependencies between them` +
+      (extras ? ", extras included." : ".");
+    dirty = true;
+  }
+
+  function upload() {
+    const buffer = (data, usage = gl.STATIC_DRAW) => {
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+      return b;
+    };
+    buffers.pos = buffer(pos);
+    buffers.size = buffer(new Float32Array(count));
+    buffers.heat = buffer(heat, gl.DYNAMIC_DRAW);
+    buffers.nodeFocus = buffer(nodeFocus, gl.DYNAMIC_DRAW);
+    // Edges are drawn unindexed: each end needs its own `a_end`, which a vertex
+    // shared through an index buffer cannot have.
+    const edgePos = new Float32Array(edgeCount * 4);
+    const ends = new Float32Array(edgeCount * 2);
+    const kinds = new Float32Array(edgeCount * 2);
+    for (let k = 0; k < edgeCount; k++) {
+      const a = pairs[2 * k], b = pairs[2 * k + 1];
+      edgePos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * k);
+      ends[2 * k + 1] = 1;
+      kinds[2 * k] = kinds[2 * k + 1] = kind[k];
+    }
+    buffers.edgePos = buffer(edgePos);
+    buffers.ends = buffer(ends);
+    buffers.kinds = buffer(kinds);
+    buffers.edgeFocus = buffer(edgeFocus, gl.DYNAMIC_DRAW);
+    buffers.spark = gl.createBuffer();
+    buffers.sparkAlpha = gl.createBuffer();
+  }
+
+  // Camera: `k` is CSS pixels per data unit, (cx, cy) the data point at center.
+  const view = { cx: 0, cy: 0, k: 1 };
+  let width = 0, height = 0, dpr = 1;
+  let home;
+  let dirty = true;
+
+  const homeView = () => ({
+    cx: graph.extent / 2,
+    cy: graph.extent / 2,
+    k: Math.min((width - 48) / graph.extent, (height - 48) / graph.extent),
+  });
+  function fit() {
+    home = homeView();
+    Object.assign(view, home);
+    dirty = true;
+  }
+
+  // The still graph -- every edge and dot -- is drawn into a multisampled
+  // target only when something about it changes, resolved into a texture, and
+  // that texture copied to the screen each frame. Redrawing 380,000 edges
+  // sixty times a second to move a few glowing dots is what made the page slow
+  // to first paint. The resolve goes through a texture because resolving a
+  // multisampled buffer straight onto the canvas silently draws nothing on
+  // some drivers.
+  let target = null;
+  function makeTarget() {
+    if (target) {
+      gl.deleteFramebuffer(target.fbo);
+      gl.deleteRenderbuffer(target.color);
+      gl.deleteRenderbuffer(target.depth);
+      gl.deleteFramebuffer(target.resolved);
+      gl.deleteTexture(target.texture);
+    }
+    const samples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES));
+    const storage = (format) => {
+      const rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+      gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, format, canvas.width, canvas.height);
+      return rb;
+    };
+    target = { fbo: gl.createFramebuffer(), color: storage(gl.RGBA8), depth: storage(gl.DEPTH_COMPONENT24) };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, target.color);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, target.depth);
+    target.texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, target.texture);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, canvas.width, canvas.height);
+    target.resolved = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.resolved);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target.texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = surface.getBoundingClientRect();
+    width = rect.width; height = rect.height;
+    for (const c of [canvas, labels]) { c.width = Math.round(width * dpr); c.height = Math.round(height * dpr); }
+    makeTarget();
+    if (graph) {
+      // A reader still at the overview stays at it; one who has zoomed in
+      // keeps their place.
+      const atHome = home && view.k === home.k && view.cx === home.cx && view.cy === home.cy;
+      home = homeView();
+      if (atHome) Object.assign(view, home);
+      renderMinimapBase();
+    }
+    dirty = true;
+  }
+
+  const toScreen = (x, y) => [(x - view.cx) * view.k + width / 2, (y - view.cy) * view.k + height / 2];
+  const toData = (sx, sy) => [(sx - width / 2) / view.k + view.cx, (sy - height / 2) / view.k + view.cy];
+  // Dots grow a little as the reader zooms in, but far slower than the space
+  // between them, so a dense cluster opens up rather than staying a blot.
+  const zoomGrowth = () => Math.min(4, Math.max(1, Math.sqrt(view.k / home.k)));
+
+  function useProgram(program, l) {
+    gl.useProgram(program);
+    gl.uniform2f(l.u_scale, (2 * view.k) / width, (-2 * view.k) / height);
+    gl.uniform2f(l.u_offset, (-2 * view.k * view.cx) / width, (2 * view.k * view.cy) / height);
+    gl.uniform1f(l.u_focusing, selected >= 0 ? 1 : 0);
+  }
+
+  function attrib(location, buffer, size) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+  }
+
+  // Breadth-first over one direction, recording each node's hop count.
+  function reach(origin, list, start) {
+    const depth = new Map([[origin, 0]]);
+    let frontier = [origin];
+    for (let d = 1; frontier.length; d++) {
+      const next = [];
+      for (const from of frontier) {
+        for (let k = start[from]; k < start[from + 1]; k++) {
+          const to = list[k];
+          if (!depth.has(to)) { depth.set(to, d); next.push(to); }
+        }
+      }
+      frontier = next;
+    }
+    return depth;
+  }
+
+  // The selection: every project it reaches either way, and the edges that lie
+  // on a shortest path to each of them. Cross edges are left dim, or numpy's
+  // trace would be every line on the page.
+  let selected = -1;
+  let trace = null;
+  let traceAlpha = 1;
+  function focus(origin) {
+    nodeFocus.fill(0);
+    edgeFocus.fill(0);
+    trace = null;
+    if (origin < 0) return;
+    const downDepth = reach(origin, down, downStart);
+    const upDepth = reach(origin, up, upStart);
+    for (const [i, d] of downDepth) nodeFocus[i] = d;
+    for (const [i, d] of upDepth) if (d) nodeFocus[i] = -d;
+    nodeFocus[origin] = 0.5;
+    let traced = 0;
+    for (let k = 0; k < edgeCount; k++) {
+      if (!extras && kind[k]) continue;
+      const a = pairs[2 * k], b = pairs[2 * k + 1];
+      const da = downDepth.get(a), db = downDepth.get(b);
+      let f = 0;
+      if (da !== undefined && db !== undefined && da === db + 1) f = da;
+      else {
+        const ua = upDepth.get(a), ub = upDepth.get(b);
+        if (ua !== undefined && ub !== undefined && ub === ua + 1) f = -ub;
+      }
+      edgeFocus[2 * k] = edgeFocus[2 * k + 1] = f;
+      if (f) traced++;
+    }
+    // A few hundred traced lines can each be drawn strong; numpy's ten
+    // thousand would be a solid green disc, so they thin as they multiply.
+    traceAlpha = Math.min(1, Math.sqrt(400 / Math.max(traced, 1)));
+    trace = {
+      down: downDepth.size - 1,
+      up: upDepth.size - 1,
+      nodes: [...upDepth.keys(), ...downDepth.keys()].sort((a, b) => a - b),
+    };
+  }
+
+  function uploadFocus() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nodeFocus);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeFocus);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.edgeFocus);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeFocus);
+  }
+
+  // Cascade state for releases: when each lit node lights, and how bright.
+  const litAt = new Map();
+  let sparks = [];
+
+  function cascade(origin, now) {
+    const seen = new Set([origin]);
+    let frontier = [origin];
+    litAt.set(origin, { t: now, amp: 1 });
+    let lit = 1;
+    for (let depth = 1; depth <= MAX_DEPTH && frontier.length && lit < MAX_LIT; depth++) {
+      const next = [];
+      const t = now + depth * HOP_MS;
+      const amp = DECAY ** depth;
+      for (const from of frontier) {
+        for (let k = downStart[from]; k < downStart[from + 1] && lit < MAX_LIT; k++) {
+          const to = down[k];
+          if (seen.has(to)) continue;
+          seen.add(to);
+          next.push(to);
+          lit++;
+          const prior = litAt.get(to);
+          if (!prior || prior.t + GLOW_MS < t) litAt.set(to, { t, amp });
+          sparks.push({ from, to, t: t - HOP_MS, amp });
+        }
+      }
+      frontier = next;
+    }
+    return seen.size - 1;
+  }
+
+  function updateHeat(now) {
+    for (const [i, { t, amp }] of litAt) {
+      const age = now - t;
+      if (age < 0) { heat[i] = 0; continue; }
+      if (age > GLOW_MS) { heat[i] = 0; litAt.delete(i); continue; }
+      heat[i] = amp * (1 - age / GLOW_MS) ** 2;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.heat);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, heat);
+  }
+
+  // The edges a release pulse is traveling along this frame, drawn as a line
+  // that brightens toward the dependent as it arrives.
+  function drawSparks(now) {
+    // Pruned in one pass: splicing one at a time went quadratic once a few
+    // big cascades had queued thousands.
+    sparks = sparks.filter((s) => now - s.t <= HOP_MS + GLOW_MS * 0.5);
+    const live = sparks.filter((s) => now >= s.t);
+    if (!live.length) return;
+    const xy = new Float32Array(live.length * 4);
+    const alpha = new Float32Array(live.length * 2);
+    live.forEach((s, n) => {
+      const age = now - s.t;
+      const fade = age < HOP_MS ? age / HOP_MS : 1 - (age - HOP_MS) / (GLOW_MS * 0.5);
+      xy.set([pos[2 * s.from], pos[2 * s.from + 1], pos[2 * s.to], pos[2 * s.to + 1]], n * 4);
+      alpha[n * 2] = 0.15 * s.amp * fade;
+      alpha[n * 2 + 1] = 0.9 * s.amp * fade;
+    });
+    useProgram(sparkProgram, sparkLoc);
+    gl.uniform3fv(sparkLoc.u_hot, colors.accent);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.spark);
+    gl.bufferData(gl.ARRAY_BUFFER, xy, gl.STREAM_DRAW);
+    attrib(sparkLoc.a_pos, buffers.spark, 2);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.sparkAlpha);
+    gl.bufferData(gl.ARRAY_BUFFER, alpha, gl.STREAM_DRAW);
+    attrib(sparkLoc.a_alpha, buffers.sparkAlpha, 1);
+    gl.drawArrays(gl.LINES, 0, live.length * 2);
+  }
+
+  function drawLabels() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.font = `500 12px ${colors.font}`;
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    const taken = [];
+    const fits = (x, y, w) => !taken.some((r) => x < r[0] + r[2] + 6 && x + w + 6 > r[0] && Math.abs(y - r[1]) < 15);
+    const place = (i, strong) => {
+      const [sx, sy] = toScreen(pos[2 * i], pos[2 * i + 1]);
+      if (sx < 0 || sy < 0 || sx > width || sy > height) return false;
+      const w = ctx.measureText(names[i]).width;
+      // Flipped to the left of the dot near the right edge, so a name is not
+      // cut off by the frame it is meant to sit inside.
+      const gap = dotPx(i) / 2 + 4;
+      const x = sx + gap + w > width - 4 ? sx - gap - w : sx + gap;
+      if (!strong && !fits(x, sy, w)) return false;
+      taken.push([x, sy, w]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = css(colors.paper);
+      ctx.strokeText(names[i], x, sy);
+      ctx.fillStyle = css(strong ? colors.ink : colors.muted);
+      ctx.fillText(names[i], x, sy);
+      return true;
+    };
+    if (selected >= 0) place(selected, true);
+    // Names in rank order, fewer when zoomed out: a dozen recognizable names
+    // read as a map, fifty crowded ones read as noise. While tracing, only
+    // projects on the trace are named.
+    const order = trace ? trace.nodes : extras ? orderAll : null;
+    const limit = order ? Math.min(order.length, 6000) : Math.min(ranked, 4000);
+    const budget = Math.round((12 * zoomGrowth() ** 2 * width * height) / 1e6) + 8;
+    let shown = 0;
+    for (let n = 0; n < limit && shown < budget; n++) {
+      const i = order ? order[n] : n;
+      if (i !== selected && visible(i) && place(i, false)) shown++;
+    }
+  }
+
+  // The navigator: every visible dot, drawn once into a cached image whenever
+  // the mode, the theme or the size changes, then the viewport outlined on top
+  // of it whenever the view moves.
+  const MINI = 136;
+  let miniBase = null;
+  function renderMinimapBase() {
+    if (!graph) return;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    minimap.width = minimap.height = MINI * scale;
+    miniBase = document.createElement("canvas");
+    miniBase.width = miniBase.height = MINI * scale;
+    const c = miniBase.getContext("2d");
+    const f = (MINI * scale) / graph.extent;
+    c.fillStyle = css(colors.muted, 0.35);
+    for (let i = 0; i < count; i++) {
+      if (!visible(i)) continue;
+      const r = Math.max(0.6, sizeOf(i) * 0.1) * scale;
+      c.fillRect(pos[2 * i] * f - r / 2, pos[2 * i + 1] * f - r / 2, r, r);
+    }
+    dirty = true;
+  }
+  function drawMinimap() {
+    if (!miniBase || narrow.matches) return;
+    const s = minimap.width;
+    const f = s / graph.extent;
+    mctx.clearRect(0, 0, s, s);
+    mctx.drawImage(miniBase, 0, 0);
+    if (selected >= 0) {
+      mctx.fillStyle = css(colors.accent);
+      mctx.beginPath();
+      mctx.arc(pos[2 * selected] * f, pos[2 * selected + 1] * f, 3 * (s / MINI), 0, Math.PI * 2);
+      mctx.fill();
+    }
+    const [x0, y0] = toData(0, 0);
+    const [x1, y1] = toData(width, height);
+    mctx.strokeStyle = css(colors.ink);
+    mctx.lineWidth = s / MINI;
+    mctx.strokeRect(x0 * f, y0 * f, (x1 - x0) * f, (y1 - y0) * f);
+  }
+
+  function animating() {
+    return litAt.size > 0 || sparks.length > 0 || (selected >= 0 && moving());
+  }
+
+  function drawEdges(pass, now) {
+    useProgram(edgeProgram, edgeLoc);
+    gl.uniform1f(edgeLoc.u_pass, pass);
+    gl.uniform1f(edgeLoc.u_extras, extras ? 1 : 0);
+    gl.uniform3fv(edgeLoc.u_ink, colors.ink);
+    gl.uniform3fv(edgeLoc.u_hot, colors.accent);
+    // Faint enough at the overview that the core reads as density, not as a
+    // solid knot of ink; lines strengthen as zooming thins them out.
+    gl.uniform1f(edgeLoc.u_alpha, Math.min(0.14, 0.012 * zoomGrowth() ** 2));
+    gl.uniform1f(edgeLoc.u_traceAlpha, traceAlpha);
+    gl.uniform1f(edgeLoc.u_time, pass ? (now / 1400) % 1 : 0.5);
+    attrib(edgeLoc.a_pos, buffers.edgePos, 2);
+    attrib(edgeLoc.a_end, buffers.ends, 1);
+    attrib(edgeLoc.a_kind, buffers.kinds, 1);
+    attrib(edgeLoc.a_focus, buffers.edgeFocus, 1);
+    gl.drawArrays(gl.LINES, 0, edgeCount * 2);
+  }
+
+  function drawNodes(pass) {
+    useProgram(nodeProgram, nodeLoc);
+    gl.uniform1f(nodeLoc.u_pass, pass);
+    gl.uniform1f(nodeLoc.u_px, dpr);
+    gl.uniform1f(nodeLoc.u_grow, growth());
+    gl.uniform3fv(nodeLoc.u_base, colors.muted);
+    gl.uniform3fv(nodeLoc.u_hot, colors.accent);
+    gl.uniform3fv(nodeLoc.u_ink, colors.ink);
+    attrib(nodeLoc.a_pos, buffers.pos, 2);
+    attrib(nodeLoc.a_size, buffers.size, 1);
+    attrib(nodeLoc.a_heat, buffers.heat, 1);
+    attrib(nodeLoc.a_focus, buffers.nodeFocus, 1);
+    gl.drawArrays(gl.POINTS, 0, count);
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!graph || (!dirty && !animating())) return;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    if (dirty) {
+      dirty = false;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+      gl.clearColor(...colors.paper, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      drawEdges(0, now);
+      gl.enable(gl.DEPTH_TEST);
+      drawNodes(0);
+      gl.disable(gl.DEPTH_TEST);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.resolved);
+      gl.blitFramebuffer(0, 0, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      drawLabels();
+      drawMinimap();
+    }
+
+    gl.disable(gl.BLEND);
+    gl.useProgram(copyProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, target.texture);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.BLEND);
+
+    // Only what moves is drawn every frame.
+    if (selected >= 0 && moving()) drawEdges(1, now);
+    drawSparks(now);
+    updateHeat(now);
+    if (litAt.size) drawNodes(1);
+  }
+
+  function nodeAt(sx, sy) {
+    const [x, y] = toData(sx, sy);
+    const span = 24 / view.k;
+    const { cells, buckets, cellOf } = grid;
+    let best = -1, bestDist = Infinity;
+    for (let gy = cellOf(y - span); gy <= cellOf(y + span); gy++) {
+      for (let gx = cellOf(x - span); gx <= cellOf(x + span); gx++) {
+        for (const i of buckets[gy * cells + gx]) {
+          if (!visible(i)) continue;
+          // While tracing, only projects on the trace answer the pointer.
+          if (selected >= 0 && nodeFocus[i] === 0) continue;
+          const dx = (pos[2 * i] - x) * view.k, dy = (pos[2 * i + 1] - y) * view.k;
+          const dist = Math.hypot(dx, dy) - dotPx(i) / 2;
+          if (dist < bestDist) { bestDist = dist; best = i; }
+        }
+      }
+    }
+    return bestDist <= 6 ? best : -1;
+  }
+
+  const fmt = (n) => n.toLocaleString("en-US");
+  const plural = (n, word) => `${fmt(n)} ${word}${n === 1 ? "" : "s"}`;
+  const pypi = (name) => `https://pypi.org/project/${encodeURIComponent(name)}/`;
+  const rankText = (i) => (i < ranked ? `rank ${fmt(i + 1)}` : "ranked only with extras");
+  const countsText = (i) => {
+    const runtime = graph.dependents[i], every = graph.dependents_all[i];
+    return every === runtime ? plural(runtime, "dependent")
+      : `${plural(runtime, "dependent")}, ${fmt(every)} incl. extras`;
+  };
+
+  function el(tag, props = {}, ...children) {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  }
+  // A heading and the first few names, ranked; the rest are one click away,
+  // with a filter once there are more than can be scanned by eye.
+  function jumpList(heading, items) {
+    if (!items.length) return [];
+    const list = el("ol");
+    const fill = (subset) => {
+      list.replaceChildren(...subset.map((i) => {
+        const button = el("button", { type: "button", className: "jump", textContent: names[i] });
+        button.addEventListener("click", () => select(i, { fly: true }));
+        return el("li", {}, button, el("span", { className: "meta", textContent: fmt(dependentsOf(i)) }));
+      }));
+    };
+    fill(items.slice(0, LIST_LIMIT));
+    const parts = [el("h2", { textContent: `${heading} (${fmt(items.length)})` }), list];
+    if (items.length > LIST_LIMIT) {
+      const more = el("button", { type: "button", className: "jump", textContent: `Show all ${fmt(items.length)}` });
+      const moreItem = el("p", { className: "meta" }, more);
+      more.addEventListener("click", () => {
+        fill(items);
+        moreItem.remove();
+        if (items.length > 50) {
+          const filter = el("input", { type: "search", placeholder: `Filter ${heading.toLowerCase()}`, autocomplete: "off" });
+          filter.setAttribute("aria-label", `Filter ${heading.toLowerCase()}`);
+          filter.addEventListener("input", () => {
+            const wanted = canonical(filter.value);
+            fill(wanted ? items.filter((i) => names[i].includes(wanted)) : items);
+          });
+          list.before(filter);
+          filter.focus();
+        }
+      });
+      parts.push(moreItem);
+    }
+    return parts;
+  }
+
+  function showDetail(i) {
+    if (i < 0) { detail.hidden = true; detail.replaceChildren(); return; }
+    const link = el("a", { href: pypi(names[i]), id: "detail-name", target: "_blank", rel: "noopener", textContent: names[i] });
+    link.setAttribute("aria-describedby", "new-tab");
+    const close = el("button", { type: "button", className: "icon", textContent: "×" });
+    close.setAttribute("aria-label", "Clear the selection");
+    close.addEventListener("click", () => select(-1));
+    const rank = rankText(i);
+    detail.replaceChildren(
+      el("div", { className: "detail-head" }, link, close),
+      el("p", { className: "meta", textContent: `${rank[0].toUpperCase()}${rank.slice(1)} · ${countsText(i)}` }),
+      el("p", { className: "meta", textContent:
+        `A release reaches ${plural(trace.down, "drawn project")}. It depends on ${fmt(trace.up)} in all.` }),
+      ...jumpList("Depends on", [...up.subarray(upStart[i], upStart[i + 1])]),
+      ...jumpList("Depended on by", [...down.subarray(downStart[i], downStart[i + 1])]),
+    );
+    detail.hidden = false;
+  }
+
+  function select(i, { fly = false, quiet = false } = {}) {
+    // A list made with extras on can still name a project they alone draw.
+    if (i >= 0 && !visible(i)) return;
+    selected = i;
+    focus(i);
+    uploadFocus();
+    showDetail(i);
+    dirty = true;
+    // The panel appears without taking focus, so the selection is said through
+    // the page's one polite status region.
+    if (!quiet) {
+      statusLine.textContent = i < 0 ? "Selection cleared."
+        : `${names[i]}, ${rankText(i)}, ${countsText(i)}. A release reaches ${plural(trace.down, "drawn project")}.`;
+    }
+    if (i < 0) return;
+    if (!quiet && moving()) cascade(i, performance.now());
+    if (fly) {
+      // Frame the whole trace. A family drawn together can sit closer than a
+      // dot is wide, so a fixed zoom left a trace hidden under its own origin.
+      let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const n of trace.nodes) {
+        x0 = Math.min(x0, pos[2 * n]); x1 = Math.max(x1, pos[2 * n]);
+        y0 = Math.min(y0, pos[2 * n + 1]); y1 = Math.max(y1, pos[2 * n + 1]);
+      }
+      // On a narrow screen the selection sheet covers the bottom of the graph,
+      // so the trace is framed in the space above it.
+      const sheet = narrow.matches ? detail.offsetHeight : 0;
+      const fitK = 0.7 * Math.min(width / Math.max(x1 - x0, 1), (height - sheet) / Math.max(y1 - y0, 1));
+      view.k = Math.min(home.k * 400, Math.max(home.k, fitK));
+      view.cx = (x0 + x1) / 2;
+      view.cy = (y0 + y1) / 2 + sheet / 2 / view.k;
+    }
+  }
+
+  // Pointer: drag to pan, wheel or pinch to zoom, hover for a name, click to
+  // select. A press that moved more than a few pixels is a drag, not a click.
+  const pointers = new Map();
+  let movedPointer = false, pinchFrom = null, pressedAt = null;
+
+  function zoomAround(sx, sy, factor) {
+    const [x, y] = toData(sx, sy);
+    view.k = Math.min(home.k * 400, Math.max(home.k * 0.5, view.k * factor));
+    view.cx = x - (sx - width / 2) / view.k;
+    view.cy = y - (sy - height / 2) / view.k;
+    dirty = true;
+  }
+
+  const local = (e) => { const r = surface.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const spread = () => { const [a, b] = [...pointers.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]); };
+
+  surface.addEventListener("pointerdown", (e) => {
+    surface.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, local(e));
+    pressedAt = local(e);
+    movedPointer = false;
+    if (pointers.size === 2) pinchFrom = spread();
+  });
+  surface.addEventListener("pointermove", (e) => {
+    if (!graph) return;
+    const [sx, sy] = local(e);
+    const prior = pointers.get(e.pointerId);
+    if (prior) {
+      tip.hidden = true;
+      if (!movedPointer && Math.hypot(sx - pressedAt[0], sy - pressedAt[1]) < 4) return;
+      movedPointer = true;
+      pointers.set(e.pointerId, [sx, sy]);
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const now = spread();
+        zoomAround((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, now / pinchFrom);
+        pinchFrom = now;
+      } else {
+        surface.classList.add("dragging");
+        view.cx -= (sx - prior[0]) / view.k;
+        view.cy -= (sy - prior[1]) / view.k;
+        dirty = true;
+      }
+      return;
+    }
+    const i = nodeAt(sx, sy);
+    surface.style.cursor = i >= 0 ? "pointer" : "";
+    if (i < 0) { tip.hidden = true; return; }
+    let relation = "";
+    if (selected >= 0 && i !== selected) {
+      const d = nodeFocus[i];
+      relation = d > 0 ? ` · ${d === 1 ? "depends on" : `${d} hops from`} ${names[selected]}`
+        : ` · ${names[selected]} ${d === -1 ? "depends on it" : `reaches it in ${-d} hops`}`;
+    }
+    tip.replaceChildren(el("strong", { textContent: names[i] }),
+      el("span", { textContent: ` · ${rankText(i)} · ${countsText(i)}${relation}` }));
+    tip.hidden = false;
+    const left = Math.min(sx + 14, width - tip.offsetWidth - 8);
+    tip.style.left = `${Math.max(8, left)}px`;
+    tip.style.top = `${sy + 14 + tip.offsetHeight > height ? sy - tip.offsetHeight - 10 : sy + 14}px`;
+  });
+  const release = (e) => {
+    const wasClick = pointers.size === 1 && !movedPointer;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchFrom = null;
+    surface.classList.remove("dragging");
+    if (wasClick && e.type === "pointerup" && graph) select(nodeAt(...local(e)));
+  };
+  surface.addEventListener("pointerup", release);
+  surface.addEventListener("pointercancel", release);
+  surface.addEventListener("pointerleave", () => { tip.hidden = true; });
+  surface.addEventListener("wheel", (e) => {
+    if (!graph) return;
+    e.preventDefault();
+    zoomAround(...local(e), Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+
+  // Keyboard: the graph is focusable, and pans and zooms from the keys a map
+  // uses.
+  surface.addEventListener("keydown", (e) => {
+    if (!graph) return;
+    const step = 80 / view.k;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key]) { view.cx += moves[e.key][0]; view.cy += moves[e.key][1]; dirty = true; }
+    else if (e.key === "+" || e.key === "=") zoomAround(width / 2, height / 2, 1.4);
+    else if (e.key === "-") zoomAround(width / 2, height / 2, 1 / 1.4);
+    else if (e.key === "0") fit();
+    else return;
+    e.preventDefault();
+  });
+
+  $("zoom-in").addEventListener("click", () => graph && zoomAround(width / 2, height / 2, 1.6));
+  $("zoom-out").addEventListener("click", () => graph && zoomAround(width / 2, height / 2, 1 / 1.6));
+  $("zoom-fit").addEventListener("click", () => graph && fit());
+
+  // Click or drag on the navigator to move there.
+  function steer(e) {
+    const r = minimap.getBoundingClientRect();
+    view.cx = ((e.clientX - r.left) / r.width) * graph.extent;
+    view.cy = ((e.clientY - r.top) / r.height) * graph.extent;
+    dirty = true;
+  }
+  minimap.addEventListener("pointerdown", (e) => {
+    if (!graph) return;
+    minimap.setPointerCapture(e.pointerId);
+    steer(e);
+  });
+  minimap.addEventListener("pointermove", (e) => {
+    if (graph && minimap.hasPointerCapture(e.pointerId)) steer(e);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && selected >= 0 && graph) select(-1);
+  });
+
+  find.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !graph) return;
+    const wanted = canonical(find.value);
+    if (!wanted) return;
+    let i = byName.get(wanted);
+    // Rank order, so a prefix lands on the best-known match.
+    if (i === undefined) i = names.findIndex((n, j) => visible(j) && n.startsWith(wanted));
+    const note = (text) => { findNote.textContent = text; findNote.hidden = false; };
+    if (i < 0) {
+      note(`No drawn project matches “${find.value.trim()}”. The graph holds projects with at least ${fmt(graph.min_dependents)} dependents.`);
+      return;
+    }
+    if (!visible(i)) {
+      note(`${names[i]} has ${countsText(i)}, so it is drawn only with “Include extras” on.`);
+      return;
+    }
+    findNote.hidden = true;
+    // On a phone the keyboard would otherwise stay up over the sheet and the
+    // trace just framed for it.
+    if (narrow.matches) find.blur();
+    select(i, { fly: true });
+  });
+
+  extrasToggle.addEventListener("change", () => graph && setMode(extrasToggle.checked));
+
+  // Simulated releases, standing in for PyPI's RSS feed. A uniform pick is the
+  // honest stand-in: most releases are leaves, and a hub is a rare, big event.
+  let timer = null;
+  function simulateOne() {
+    const i = Math.floor(Math.random() * (extras ? count : ranked));
+    const reached = cascade(i, performance.now());
+    const button = el("button", { type: "button", className: "jump", textContent: names[i] });
+    button.addEventListener("click", () => select(i, { fly: true }));
+    releases.prepend(el("li", {}, button, el("span", { className: "meta",
+      textContent: reached ? ` reached ${fmt(reached)}` : " no drawn dependents" })));
+    while (releases.children.length > 3) releases.lastChild.remove();
+    dirty = true;
+  }
+  function setSimulating(on) {
+    clearInterval(timer);
+    timer = on ? setInterval(simulateOne, SIM_EVERY_MS) : null;
+    if (!simulate.checked) releases.replaceChildren();
+  }
+  simulate.addEventListener("change", () => setSimulating(simulate.checked));
+  // Simulated releases are nothing but motion, so they stop with it.
+  function syncMotion() {
+    simulate.disabled = !moving();
+    if (!moving()) {
+      simulate.checked = false;
+      setSimulating(false);
+      litAt.clear();
+      sparks = [];
+      heat?.fill(0);
+    }
+    dirty = true;
+  }
+  animate.addEventListener("change", syncMotion);
+  // A background tab stops drawing but would keep queueing releases, and pay
+  // for all of them on return.
+  document.addEventListener("visibilitychange", () => {
+    setSimulating(simulate.checked && !document.hidden);
+  });
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    readColors();
+    renderMinimapBase();
+  });
+  new ResizeObserver(resize).observe(surface);
+
+  // Hands the main thread back between load stages, so parsing and indexing
+  // the graph is several short tasks rather than one long one that holds off
+  // input and paint. scheduler.yield where it exists, a timeout where not.
+  const yieldToMain = () => ("scheduler" in window && "yield" in scheduler
+    ? scheduler.yield()
+    : new Promise((resolve) => setTimeout(resolve, 0)));
+
+  fetch("graph.json")
+    .then((r) => { if (!r.ok) throw new Error(`graph.json: HTTP ${r.status}`); return r.json(); })
+    .then(async (data) => {
+      await yieldToMain();
+      buildIndexes(data);
+      await yieldToMain();
+      // Assigned only once indexed: until then, input handlers see no graph.
+      graph = data;
+      upload();
+      await yieldToMain();
+      resize();
+      fit();
+      setMode(extrasToggle.checked);
+      statusLine.classList.add("sr-only");
+      // Motion by default only for readers who have not asked for less of it.
+      // Simulated releases stand in for a live feed that does not exist yet,
+      // so they stay out of sight unless asked for with ?simulate.
+      if (new URLSearchParams(location.search).has("simulate")) {
+        $("simulate-toggle").hidden = false;
+        simulate.checked = moving();
+        simulate.disabled = !moving();
+        setTimeout(() => setSimulating(simulate.checked && !document.hidden), 1500);
+      }
+    })
+    .catch((err) => { statusLine.textContent = `The graph could not be loaded (${err.message}).`; });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+{% endblock %}

@@ -281,7 +281,7 @@ section break under the lede.
   1px bottom rule with `3rem` of space beneath it.
 - **Typography:** Label role — uppercase, 500, 0.14em tracking, no underline.
 - **States:** Faded Ink at rest, transitioning to full Ink on hover over 180ms. The
-  current page sits at full ink with `aria-current="page"` — on a two-page site that
+  current page sits at full ink with `aria-current="page"` — on a three-page site that
   state is the only wayfinding there is.
 - **Mobile:** wraps with `0.75rem 1.5rem` gaps; no menu, no disclosure.
 

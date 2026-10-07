@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from top_pypi_dependents import artifacts, log, render, warehouse
+from top_pypi_dependents import artifacts, graph, log, render, warehouse
 from top_pypi_dependents.sources.fixture import FixtureSource
 
 if TYPE_CHECKING:
@@ -143,13 +143,42 @@ def _artifacts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _graph(args: argparse.Namespace) -> int:
+    con = warehouse.connect(Path(args.database))
+    snapshot = warehouse.latest_snapshot(con)
+    if snapshot is None:
+        msg = "database contains no snapshots; run `build` first"
+        raise SystemExit(msg)
+    out = Path(args.output)
+    with log.stage(LOGGER, "graph") as outcome:
+        payload = graph.build_graph(
+            con, snapshot.snapshot_id, min_dependents=args.min_dependents
+        )
+        con.close()
+        graph.write_graph(payload, out)
+        outcome["nodes"] = len(payload["names"])
+        outcome["edges"] = len(payload["edges"]) // 2
+        outcome["extra_edges"] = len(payload["extra_edges"]) // 2
+        outcome["bytes"] = out.stat().st_size
+    return 0
+
+
 def _render(args: argparse.Namespace) -> int:
     payload = artifacts.read_payload(Path(args.payload))
     if payload is None:
         msg = f"{args.payload} not found; run `artifacts` first"
         raise SystemExit(msg)
+    graph_path = Path(args.graph) if args.graph else None
+    if graph_path is not None and not graph_path.exists():
+        msg = f"{args.graph} not found; run `graph` first"
+        raise SystemExit(msg)
     with log.stage(LOGGER, "render") as outcome:
-        render.render_site(payload, Path(args.output), rows=args.rows)
+        try:
+            render.render_site(
+                payload, Path(args.output), rows=args.rows, graph=graph_path
+            )
+        except render.StaleGraphError as exc:
+            raise SystemExit(str(exc)) from None
         outcome["listed"] = min(len(payload["rows"]), args.rows)
         outcome["ranked"] = len(payload["rows"])
     return 0
@@ -223,12 +252,31 @@ def _parser() -> argparse.ArgumentParser:
     art.add_argument("--edges", default=None, help="path for the Parquet edge export")
     art.set_defaults(func=_artifacts)
 
+    lay = sub.add_parser("graph", help="emit the laid-out graph for the cascade page")
+    lay.add_argument("--database", default="build/dependents.duckdb")
+    lay.add_argument("--output", default="data/graph.json")
+    lay.add_argument(
+        "--min-dependents",
+        type=int,
+        default=DEFAULT_MIN_DEPENDENTS,
+        help=(
+            "draw only projects with at least this many dependents; the page "
+            "shows those clearing it on runtime dependents, and the rest once "
+            f"extras are switched on (default {DEFAULT_MIN_DEPENDENTS}); "
+            "fixture runs pass 1"
+        ),
+    )
+    lay.set_defaults(func=_graph)
+
     site = sub.add_parser("render", help="render the static site")
     site.add_argument(
         "--payload", default="data/latest.json", help="the ranked JSON to render"
     )
     site.add_argument("--output", default="site")
     site.add_argument("--rows", type=int, default=render.ROWS)
+    site.add_argument(
+        "--graph", default=None, help="the laid-out graph; adds the cascade page"
+    )
     site.set_defaults(func=_render)
 
     return parser

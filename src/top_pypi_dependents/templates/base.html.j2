@@ -416,15 +416,19 @@
       rank, project, and the count the page ranks on. */
     thead th:nth-child(3), tbody td:nth-child(3) { padding-right: 0; }
   }
+{% block style %}{% endblock %}
 </style>
 </head>
-<body>
+<body{% block body_attrs %}{% endblock %}>
 <a class="skip" href="#content">Skip to content</a>
 <span id="new-tab" hidden>Opens in a new tab</span>
 {# Two links styled identically gave a two-page site no wayfinding at all
   beyond its own h1. #}
 <nav>
   <a href="index.html"{% if page == "rankings" %} aria-current="page"{% endif %}>Rankings</a>
+  {% if has_cascade %}
+  <a href="cascade.html"{% if page == "cascade" %} aria-current="page"{% endif %}>Cascade</a>
+  {% endif %}
   <a href="data.html"{% if page == "data" %} aria-current="page"{% endif %}>Data</a>
 </nav>
 <main id="content">

@@ -462,6 +462,42 @@ def test_a_source_with_no_documentation_is_not_linked(
     assert '<a href="https://docs.pypi.org' not in html
 
 
+def test_the_cascade_page_is_only_rendered_with_a_graph(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, rows=2)
+    assert not (tmp_path / "cascade.html").exists()
+    assert "cascade.html" not in (tmp_path / "index.html").read_text(encoding="utf-8")
+
+
+def _graph_file(tmp_path: Path, payload: dict, **fields: object) -> Path:
+    source = tmp_path / "graph.json"
+    graph = {"generated_at": payload["generated_at"], "min_dependents": 3, **fields}
+    source.write_text(json.dumps(graph) + "\n", encoding="utf-8")
+    return source
+
+
+def test_a_graph_adds_the_cascade_page_and_serves_the_graph(
+    tmp_path: Path, payload: dict
+) -> None:
+    source = _graph_file(tmp_path, payload)
+    site = tmp_path / "site"
+    render.render_site(payload, site, rows=2, graph=source)
+    assert (site / "graph.json").read_bytes() == source.read_bytes()
+    page = (site / "cascade.html").read_text(encoding="utf-8")
+    assert 'href="cascade.html" aria-current="page"' in page
+    assert 'fetch("graph.json")' in page
+    assert 'href="cascade.html"' in (site / "index.html").read_text(encoding="utf-8")
+
+
+def test_the_cascade_page_is_self_contained(tmp_path: Path, payload: dict) -> None:
+    source = _graph_file(tmp_path, payload)
+    render.render_site(payload, tmp_path / "site", rows=2, graph=source)
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert "<script src" not in html
+    assert "cdn." not in html
+
+
 def test_links_off_the_site_open_a_new_tab_and_say_so(
     tmp_path: Path, payload: dict
 ) -> None:
@@ -472,3 +508,33 @@ def test_links_off_the_site_open_a_new_tab_and_say_so(
         for anchor in re.findall(r'<a href="https?://[^"]*"[^>]*>', html):
             assert 'target="_blank" rel="noopener"' in anchor, anchor
             assert 'aria-describedby="new-tab"' in anchor, anchor
+
+
+def test_the_key_states_the_graphs_own_threshold(tmp_path: Path, payload: dict) -> None:
+    """The graph's minimum, not the ranking's: the two are set separately."""
+    source = _graph_file(tmp_path, payload)
+    render.render_site(payload, tmp_path / "site", rows=2, graph=source)
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert "at least 3 dependents are drawn" in html
+
+
+def test_a_graph_from_another_snapshot_is_refused_before_writing(
+    tmp_path: Path, payload: dict
+) -> None:
+    source = _graph_file(tmp_path, payload, generated_at="2026-08-01T00:00:00+00:00")
+    site = tmp_path / "site"
+    with pytest.raises(render.StaleGraphError, match="2026-08-01"):
+        render.render_site(payload, site, rows=2, graph=source)
+    assert not site.exists()
+
+
+def test_simulated_releases_are_hidden_unless_asked_for(
+    tmp_path: Path, payload: dict
+) -> None:
+    """Not a live feed yet, so the toggle ships hidden behind ?simulate."""
+    render.render_site(
+        payload, tmp_path / "site", rows=2, graph=_graph_file(tmp_path, payload)
+    )
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert '<label class="toggle" id="simulate-toggle" hidden>' in html
+    assert 'has("simulate")' in html

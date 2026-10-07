@@ -7,9 +7,9 @@ Guidance for Claude Code working in this repository.
 `top-pypi-dependents` ranks PyPI projects by how many other projects depend on
 them. Once a month an unattended GitHub Actions job reads PyPI's BigQuery
 metadata table, picks one release per project, explodes `requires_dist` into a
-dependency graph in DuckDB, and publishes three things: a ranked JSON committed
-to this repo, a static site on GitHub Pages, and a DuckDB database plus Parquet
-edge list attached to a dated Release.
+dependency graph in DuckDB, and publishes three things: a ranked JSON and a
+laid-out graph committed to this repo, a static site on GitHub Pages, and a
+DuckDB database plus Parquet edge list attached to a dated Release.
 
 Repo-only tooling. Nothing here is published to PyPI.
 
@@ -117,6 +117,21 @@ published a payload and a footer claiming BigQuery data came from a fixture.
 workflow never commit its own artifact. The commit check stages first and tests
 `--cached`.
 
+**The graph layout takes about 90 seconds, and that is DrL.** Fruchterman-Reingold
+ran in 3 and drew one undifferentiated blob. The layout seeds igraph's process-wide
+generator and hands it back after; a `seed=` starting layout alone was not repeatable,
+and a hand-picked starting square made each iteration quadratic.
+
+**Hidden family hubs and hub down-weighting are layout-only.** Projects sharing a
+name prefix (`odoo14-*`, `alibabacloud-*`) are tied to an invisible hub, and edges
+into big hubs are weighted down by `1/log2(2 + dependents)`; neither is drawn. Raise
+the hub weight and the core collapses back into a knot around numpy.
+
+**The cascade page caches the still graph.** Edges and dots render into a multisampled
+offscreen target only when the view or selection changes; each frame copies it and
+draws only what moves. The copy goes through a resolved texture because a multisampled
+blit straight onto the canvas silently draws nothing on some drivers.
+
 ## Things that are easy to get wrong
 
 **`sql/winners.sql` version ordering.** Three traps, each producing a plausible
@@ -138,6 +153,10 @@ overwrites `data/latest.json` to compute rank deltas, so recomputing them from
 DuckDB afterwards would compare the new ranking against itself and render every
 row as unchanged.
 
+**A project is never its own dependent.** `foo[all]` requiring `foo[x]` is a
+self-reference; `RANKINGS_SQL` excludes `dependent = dependency`, which 7,908 live
+projects declared in October 2026. Snapshots ranked before that change counted them.
+
 **Names are canonicalized everywhere.** The source table stores `Django`, not
 `django`. A lowercase-only comparison returns nothing.
 
@@ -153,8 +172,8 @@ prek run --all-files  # the git-hook gate; must pass on a clean clone
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 155 passed, 3 skipped
-uv sync --group bigquery       # 158 passed, 0 skipped
+uv sync                        # 186 passed, 3 skipped
+uv sync --group bigquery       # 189 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
@@ -167,7 +186,10 @@ uv run top-pypi-dependents build --input tests/fixtures --database build/dev.duc
     --min-projects 1 --min-audit-sample 1
 uv run top-pypi-dependents artifacts --database build/dev.duckdb \
     --output build/latest.json --limit 20 --min-dependents 1
-uv run top-pypi-dependents render --payload build/latest.json --output site --rows 20
+uv run top-pypi-dependents graph --database build/dev.duckdb \
+    --output build/graph.json --min-dependents 1
+uv run top-pypi-dependents render --payload build/latest.json \
+    --graph build/graph.json --output site --rows 20
 ```
 
 Every stage logs progress and outcomes to stderr; stdout stays the result.
@@ -175,16 +197,33 @@ Every stage logs progress and outcomes to stderr; stdout stays the result.
 inside the long loops.
 
 `render` also writes `latest.json`, `latest.min.json` and `search-index.json`
-into the site output. That is what the site serves, and `site.yml` republishes it
-from the committed `data/latest.json` without touching BigQuery whenever a
+into the site output, and with `--graph`, `cascade.html` and `graph.json`. That is
+what the site serves, and `site.yml` republishes it from the committed
+`data/latest.json` and `data/graph.json` without touching BigQuery whenever a
 template changes.
 
-**The site is two pages, and the ranking is the root.** `index.html` is the table
+**The site is three pages, and the ranking is the root.** `index.html` is the table
 and nothing else, closing with a short summary of the counting rules and a link;
 `data.html` carries the full method, the known limitations, the published files, the
-payload shape and the DuckDB and Parquet queries. A reader who came for the graph may
-never look at the table, and a reader who came for a rank should not scroll past a SQL
-block to get one.
+payload shape and the DuckDB and Parquet queries; `cascade.html` draws the ranked
+slice of the graph. A reader who came for the graph may never look at the table, and
+a reader who came for a rank should not scroll past a SQL block to get one. The
+cascade page appears only when `render` is given a graph, and the nav link with it.
+
+**The cascade page is a workspace, not a document.** One viewport tall, the graph
+filling everything the nav, title and footer line do not, controls floating over it.
+Do not add prose below the stage; the method lives in the collapsible Key and on
+`data.html`.
+
+**`graph.json` must come from the same snapshot as the payload.** `render` compares
+`generated_at` and refuses a mismatch before writing anything, because a stale graph
+would publish last month's ranks under this month's footer. `graph` runs before the
+Artifacts step renames the database in `refresh.yml`.
+
+**The graph's node set counts extras; its first `ranked` nodes do not.** Nodes are
+every project with `dependents_all >= min`, in runtime rank order, so the runtime set
+is a prefix and the page hides the rest until "Include extras" is on. One layout serves
+both modes, so switching never moves a dot.
 
 **The page lists rows; it does not reveal them.** `--rows` (default
 `render.ROWS`, 1,000) is how many ranked projects the ranked page carries, and all
@@ -212,8 +251,8 @@ columns do not fit and the ranked count is the one the page sorts on.
   End with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` and nothing
   else — session links were deliberately stripped from this history.
 - Do not commit or push unless asked.
-- `data/` is deliberately **not** gitignored; `data/latest.json` is the one
-  committed artifact.
+- `data/` is deliberately **not** gitignored; `data/latest.json` and
+  `data/graph.json` are the committed artifacts.
 - `select = ["ALL"]` in ruff. Fix the code rather than adding an ignore; if an
   ignore is genuinely unavoidable, give it a trailing comment saying why.
 - Every GitHub Action is pinned to a full commit SHA with a `# vX.Y.Z` comment.
