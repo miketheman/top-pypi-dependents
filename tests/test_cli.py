@@ -112,6 +112,41 @@ def test_graph_feeds_the_cascade_page(tmp_path: Path) -> None:
     assert (site / "graph.json").exists()
 
 
+def test_graph_starts_from_the_file_it_replaces(tmp_path: Path) -> None:
+    """Last month's graph is this month's starting map; --fresh ignores it."""
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    out = tmp_path / "graph.json"
+    main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED])
+    args = [
+        "graph",
+        "--database",
+        str(db),
+        "--output",
+        str(out),
+        "--min-dependents",
+        "1",
+    ]
+    main(args)
+    fresh = json.loads(out.read_text(encoding="utf-8"))
+    names = fresh["names"]
+    a, b = names.index("requests"), names.index("urllib3")
+    swapped = dict(fresh)
+    swapped["x"] = list(fresh["x"])
+    swapped["y"] = list(fresh["y"])
+    swapped["x"][a], swapped["x"][b] = fresh["x"][b], fresh["x"][a]
+    swapped["y"][a], swapped["y"][b] = fresh["y"][b], fresh["y"][a]
+    out.write_text(json.dumps(swapped), encoding="utf-8")
+
+    main(args)
+    seeded = json.loads(out.read_text(encoding="utf-8"))
+    assert (seeded["x"][a], seeded["y"][a]) == (swapped["x"][a], swapped["y"][a])
+
+    main([*args, "--fresh"])
+    again = json.loads(out.read_text(encoding="utf-8"))
+    assert (again["x"], again["y"]) == (fresh["x"], fresh["y"])
+
+
 def test_graph_on_an_empty_database_exits(tmp_path: Path) -> None:
     db = tmp_path / "empty.duckdb"
     con = warehouse.connect(db)

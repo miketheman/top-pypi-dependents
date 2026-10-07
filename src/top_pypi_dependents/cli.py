@@ -150,9 +150,17 @@ def _graph(args: argparse.Namespace) -> int:
         msg = "database contains no snapshots; run `build` first"
         raise SystemExit(msg)
     out = Path(args.output)
+    # Last month's map, which this month's starts from: the file about to be
+    # overwritten, unless another is named or a fresh layout is asked for.
+    previous = None
+    if not args.fresh:
+        previous = artifacts.read_payload(Path(args.previous) if args.previous else out)
     with log.stage(LOGGER, "graph") as outcome:
         payload = graph.build_graph(
-            con, snapshot.snapshot_id, min_dependents=args.min_dependents
+            con,
+            snapshot.snapshot_id,
+            min_dependents=args.min_dependents,
+            previous=previous,
         )
         con.close()
         graph.write_graph(payload, out)
@@ -160,6 +168,7 @@ def _graph(args: argparse.Namespace) -> int:
         outcome["edges"] = len(payload["edges"]) // 2
         outcome["extra_edges"] = len(payload["extra_edges"]) // 2
         outcome["bytes"] = out.stat().st_size
+        outcome["seeded"] = previous is not None
     return 0
 
 
@@ -265,6 +274,17 @@ def _parser() -> argparse.ArgumentParser:
             f"extras are switched on (default {DEFAULT_MIN_DEPENDENTS}); "
             "fixture runs pass 1"
         ),
+    )
+    lay.add_argument(
+        "--previous",
+        default=None,
+        help="last month's graph to start the layout from (default: --output, "
+        "if it exists)",
+    )
+    lay.add_argument(
+        "--fresh",
+        action="store_true",
+        help="lay out from scratch, ignoring any previous graph",
     )
     lay.set_defaults(func=_graph)
 

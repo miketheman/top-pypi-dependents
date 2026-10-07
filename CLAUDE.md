@@ -122,6 +122,13 @@ ran in 3 and drew one undifferentiated blob. The layout seeds igraph's process-w
 generator and hands it back after; a `seed=` starting layout alone was not repeatable,
 and a hand-picked starting square made each iteration quadratic.
 
+**Each month's layout starts from last month's.** `graph` seeds DrL from the file it
+is about to overwrite (`--previous` names another, `--fresh` ignores it), scaled into
+DrL's density grid -- a seed outside a few thousand units fails outright -- then turns
+the result to match. Seeding alone barely held anything still; the turn is what keeps
+numpy's region where readers left it. The rim band is placed by rank, so it reshuffles
+as ranks move.
+
 **Hidden family hubs and hub down-weighting are layout-only.** Projects sharing a
 name prefix (`odoo14-*`, `alibabacloud-*`) are tied to an invisible hub, and edges
 into big hubs are weighted down by `1/log2(2 + dependents)`; neither is drawn. Raise

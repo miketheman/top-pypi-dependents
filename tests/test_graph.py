@@ -213,3 +213,65 @@ def test_an_unknown_snapshot_is_an_error(con_and_snapshot: ConAndSnapshot) -> No
     con, _ = con_and_snapshot
     with pytest.raises(ValueError, match="no snapshot with id 99"):
         graph.build_graph(con, 99, min_dependents=1)
+
+
+def test_align_undoes_a_rotation_and_a_reflection() -> None:
+    """Last month's map comes back the same way up, whatever DrL did."""
+    target = [(3.0, 0.0), (0.0, 1.0), (-2.0, -1.0), (1.0, 2.0)]
+    angle = 2.0
+    turned = [
+        (
+            math.cos(angle) * x - math.sin(angle) * -y,
+            math.sin(angle) * x + math.cos(angle) * -y,
+        )
+        for x, y in target
+    ]
+    for (x, y), (tx, ty) in zip(graph.align(turned, target), target, strict=True):
+        assert math.isclose(x, tx, abs_tol=1e-9)
+        assert math.isclose(y, ty, abs_tol=1e-9)
+
+
+def test_align_without_targets_changes_nothing() -> None:
+    points = [(1.0, 2.0), (3.0, 4.0)]
+    assert graph.align(points, [None, None]) == points
+
+
+def test_a_previous_layout_is_followed(con_and_snapshot: ConAndSnapshot) -> None:
+    """Seeded from last month, a returning project lands where it was.
+
+    The fixture graph is two linked projects, so last month's map is that same
+    pair, swapped: an unseeded layout would not know which way round to draw it.
+    """
+    con, snapshot_id = con_and_snapshot
+    fresh = graph.build_graph(con, snapshot_id, min_dependents=1)
+    names = fresh["names"]
+    swapped = {
+        "names": names,
+        "x": [
+            fresh["x"][names.index(n)]
+            for n in ("urllib3", "django", "requests", "pytest")
+        ],
+        "y": [
+            fresh["y"][names.index(n)]
+            for n in ("urllib3", "django", "requests", "pytest")
+        ],
+    }
+    seeded = graph.build_graph(con, snapshot_id, min_dependents=1, previous=swapped)
+    for name in ("requests", "urllib3"):
+        i = names.index(name)
+        moved = math.hypot(
+            seeded["x"][i] - swapped["x"][i], seeded["y"][i] - swapped["y"][i]
+        )
+        assert moved < 0.05 * graph.EXTENT, name
+
+
+def test_a_project_new_this_month_starts_beside_its_neighbors() -> None:
+    """Only one of a family was here last month; the rest still lay out with it."""
+    names = ["odoo14-a", "odoo12-b", "odoo-c", "alpha"]
+    previous = {"odoo14-a": (8000, 5000)}
+    positions = graph.layout(names, [], previous=previous)
+    center = graph.EXTENT / 2
+    family = positions[:3]
+    for x, y in family:
+        assert math.hypot(x - center, y - center) <= 0.43 * graph.EXTENT
+    assert positions[0][0] > center, "the one known member keeps its side"

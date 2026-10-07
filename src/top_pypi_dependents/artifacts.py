@@ -34,8 +34,9 @@ LIMIT ?
 def read_payload(path: Path) -> dict[str, Any] | None:
     """Load a JSON artifact from disk, or ``None`` if it is not there yet.
 
-    Serves two callers: ``artifacts`` reads the file it is about to overwrite, to
-    compute rank movement; ``render`` reads the finished file it renders from.
+    Serves three callers: ``artifacts`` reads the file it is about to overwrite,
+    to compute rank movement; ``graph`` does the same, to start from last month's
+    layout; ``render`` reads the finished file it renders from.
     """
     if not path.exists():
         return None

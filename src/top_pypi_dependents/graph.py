@@ -17,7 +17,7 @@ import igraph
 from top_pypi_dependents import warehouse
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     import duckdb
@@ -122,10 +122,83 @@ def _layout_graph(
     return igraph.Graph(n=hub, edges=links), weights
 
 
+# DrL's density grid spans a few thousand units around the origin and fails
+# outright on a seed outside it, so last month's map is scaled to this radius.
+SEED_RADIUS = 600.0
+
+
+def align(
+    points: list[tuple[float, float]],
+    targets: Sequence[tuple[float, float] | None],
+) -> list[tuple[float, float]]:
+    """Rotate or reflect ``points`` about the origin to best match ``targets``.
+
+    A force layout has no up: run twice, it can come back turned or mirrored
+    even when every neighborhood is the same. Where a point has a target, the
+    turn that best lines the two up is applied to every point. Rotation keeps
+    each point's distance from the origin, so nothing leaves the disc it was
+    scaled into. Points without a target only follow the turn.
+    """
+    pairs = [(p, t) for p, t in zip(points, targets, strict=True) if t is not None]
+    if not pairs:
+        return points
+    best: tuple[float, float, float] | None = None
+    for flip in (1.0, -1.0):
+        dot = sum(x * tx + flip * y * ty for (x, y), (tx, ty) in pairs)
+        cross = sum(x * ty - flip * y * tx for (x, y), (tx, ty) in pairs)
+        angle = math.atan2(cross, dot)
+        # The rotation that maximizes alignment also minimizes squared error;
+        # the larger of the two maxima says whether to mirror first.
+        fit = math.hypot(dot, cross)
+        if best is None or fit > best[0]:
+            best = (fit, flip, angle)
+    _, flip, angle = best
+    cos, sin = math.cos(angle), math.sin(angle)
+    return [(cos * x - sin * flip * y, sin * x + cos * flip * y) for x, y in points]
+
+
+def _seed(
+    graph: igraph.Graph,
+    vertices: list[int],
+    count: int,
+    known: Mapping[int, tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Starting positions for DrL: last month's, where there is one.
+
+    A new project starts at its placed neighbors' centroid and a family hub at
+    its members'; anything with neither starts at the middle.
+    """
+    cx = sum(x for x, _ in known.values()) / len(known)
+    cy = sum(y for _, y in known.values()) / len(known)
+    distances = sorted(math.hypot(x - cx, y - cy) for x, y in known.values())
+    radius = distances[int(len(distances) * 0.995)] or 1.0
+    scaled = {
+        v: ((x - cx) / radius * SEED_RADIUS, (y - cy) / radius * SEED_RADIUS)
+        for v, (x, y) in known.items()
+    }
+    seed = []
+    for v in vertices:
+        if v in scaled:
+            seed.append(scaled[v])
+            continue
+        near = [scaled[u] for u in graph.neighbors(v) if u in scaled and u < count]
+        if near:
+            seed.append(
+                (
+                    sum(x for x, _ in near) / len(near),
+                    sum(y for _, y in near) / len(near),
+                )
+            )
+        else:
+            seed.append((0.0, 0.0))
+    return seed
+
+
 def layout(
     names: list[str],
     edges: list[tuple[int, int]],
     extra_edges: Sequence[tuple[int, int]] = (),
+    previous: dict[str, tuple[int, int]] | None = None,
 ) -> list[tuple[int, int]]:
     """Positions on ``0..EXTENT``: related projects inside, the rest around.
 
@@ -134,6 +207,12 @@ def layout(
     nothing depends on. Left to the force layout, those scattered across the
     whole square and buried the structure. They sit in a band around the rim
     instead, the highest-ranked innermost.
+
+    With ``previous`` -- last month's positions by name -- the layout starts
+    from that map and is turned to match it, so a returning visitor finds
+    numpy roughly where it was. Seeding alone still let the median project
+    drift a fifth of the core's radius on unchanged data; with the turn, a
+    tenth. Unseeded, it was nearly two-fifths.
     """
     count = len(names)
     if count == 0:
@@ -141,9 +220,13 @@ def layout(
     graph, weights = _layout_graph(names, edges, list(extra_edges))
     graph.es["weight"] = weights
     graph.vs["node"] = range(graph.vcount())
-    linked = graph.induced_subgraph(
-        [v for v in range(graph.vcount()) if graph.degree(v)]
-    )
+    vertices = [v for v in range(graph.vcount()) if graph.degree(v)]
+    linked = graph.induced_subgraph(vertices)
+    known = {
+        i: previous[name]
+        for i, name in enumerate(names)
+        if previous and name in previous and graph.degree(i)
+    }
 
     # igraph draws from one process-wide generator, so it is seeded for the
     # layout and handed back after; that is what makes a month's layout
@@ -151,7 +234,8 @@ def layout(
     # Fruchterman-Reingold's 3 seconds, and earns it: FR drew one blob.
     igraph.set_random_number_generator(random.Random(SEED))  # noqa: S311 -- a layout seed, not a secret
     try:
-        coords = linked.layout_drl(weights="weight")
+        seed = _seed(graph, vertices, count, known) if known else None
+        coords = linked.layout_drl(weights="weight", seed=seed)
     finally:
         igraph.set_random_number_generator(random)
     placed = {
@@ -169,10 +253,21 @@ def layout(
         # Scaling to them would shrink the core to a speck, so they are pulled
         # onto the rim instead.
         radius = distances[int(len(distances) * 0.995)] or 1.0
-        for node, (x, y) in placed.items():
+        nodes = list(placed)
+        disc = []
+        for node in nodes:
+            x, y = placed[node]
             dx, dy = (x - cx) / radius, (y - cy) / radius
             reach = max(1.0, math.hypot(dx, dy))
-            positions[node] = (center + dx / reach * core, center + dy / reach * core)
+            disc.append((dx / reach * core, dy / reach * core))
+        targets = [
+            (known[node][0] - center, known[node][1] - center)
+            if node in known
+            else None
+            for node in nodes
+        ]
+        for node, (x, y) in zip(nodes, align(disc, targets), strict=True):
+            positions[node] = (center + x, center + y)
 
     # A sunflower spiral fills the band at even density whatever its count.
     alone = [i for i in range(count) if i not in placed]
@@ -188,7 +283,11 @@ def layout(
 
 
 def build_graph(
-    con: duckdb.DuckDBPyConnection, snapshot_id: int, *, min_dependents: int
+    con: duckdb.DuckDBPyConnection,
+    snapshot_id: int,
+    *,
+    min_dependents: int,
+    previous: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the graph payload: parallel node arrays and flat edge lists.
 
@@ -215,7 +314,17 @@ def build_graph(
         (edges if runtime else extra_edges).append(
             (index[dependent], index[dependency])
         )
-    positions = layout(names, edges, extra_edges)
+    last = (
+        {
+            name: (x, y)
+            for name, x, y in zip(
+                previous["names"], previous["x"], previous["y"], strict=True
+            )
+        }
+        if previous
+        else None
+    )
+    positions = layout(names, edges, extra_edges, last)
 
     return {
         "generated_at": snapshot.captured_at.isoformat(),
