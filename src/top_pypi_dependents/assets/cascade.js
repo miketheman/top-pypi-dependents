@@ -156,19 +156,23 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   const edgeProgram = compile(
     `#version 300 es
     ${VIEW}
-    uniform float u_extras; uniform float u_pass;
-    in vec2 a_pos; in float a_end; in float a_focus; in float a_kind;
-    out float v_end; out float v_focus; out float v_shown; out float v_pass;
+    uniform float u_extras; uniform float u_pass; uniform float u_k;
+    in vec2 a_pos; in float a_end; in float a_focus; in float a_kind; in float a_len;
+    out float v_end; out float v_focus; out float v_shown; out float v_pass; out float v_repeat;
     void main() {
       gl_Position = vec4(a_pos * u_scale + u_offset, 0.0, 1.0);
       v_end = a_end; v_focus = a_focus; v_pass = u_pass;
+      // Pulses every 140 or so pixels of the line as drawn, and at least one:
+      // a fixed one per line crawled as a long smear once zooming stretched a
+      // line past the edges of the view.
+      v_repeat = clamp(floor(a_len * u_k / 140.0), 1.0, 12.0);
       v_shown = (a_kind > 0.5 && u_extras < 0.5) || (u_pass > 0.5 && a_focus == 0.0) ? 0.0 : 1.0;
     }`,
     `#version 300 es
     precision highp float;
     uniform vec3 u_ink; uniform vec3 u_hot; uniform float u_alpha; uniform float u_focusing;
     uniform float u_time; uniform float u_traceAlpha;
-    in float v_end; in float v_focus; in float v_shown; in float v_pass; out vec4 color;
+    in float v_end; in float v_focus; in float v_shown; in float v_pass; in float v_repeat; out vec4 color;
     void main() {
       if (v_shown < 0.5) discard;
       float shade = mix(0.1, 1.0, v_end);
@@ -182,8 +186,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
           a = u_traceAlpha * mix(0.55, 0.9, shade) / (1.0 + 0.35 * (depth - 1.0));
           // A pulse runs from the dependency to the dependent: the way a
           // release travels. Upstream lines are dashed by the same pulse.
-          float pulse = fract(u_time + v_end);
-          if (v_pass > 0.5) a = smoothstep(0.82, 1.0, pulse) * 0.6;
+          float pulse = fract(u_time + v_end * v_repeat);
+          if (v_pass > 0.5) a = smoothstep(0.75, 1.0, pulse) * 0.9;
           else if (v_focus < 0.0) a *= step(0.35, fract(pulse * 3.0));
         }
       }
@@ -266,6 +270,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     ...VIEW_NAMES,
     "u_extras",
     "u_pass",
+    "u_k",
     "u_ink",
     "u_hot",
     "u_alpha",
@@ -275,8 +280,31 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     "a_end",
     "a_focus",
     "a_kind",
+    "a_len",
   ]);
   const sparkLoc = loc(sparkProgram, [...VIEW_NAMES, "u_hot", "a_pos", "a_alpha"]);
+  // A bead at the head of each pulse. A line is one pixel wide whatever is
+  // asked of it, and a one-pixel pulse is easy to lose once zooming has
+  // stretched the lines across the view; a dot is not.
+  const beadProgram = compile(
+    `#version 300 es
+    ${VIEW}
+    uniform float u_size;
+    in vec2 a_pos;
+    void main() { gl_Position = vec4(a_pos * u_scale + u_offset, 0.0, 1.0); gl_PointSize = u_size; }`,
+    `#version 300 es
+    precision highp float;
+    uniform vec3 u_hot; uniform float u_alpha;
+    out vec4 color;
+    void main() {
+      vec2 c = gl_PointCoord * 2.0 - 1.0;
+      float d = dot(c, c);
+      if (d > 1.0) discard;
+      float a = u_alpha * (1.0 - smoothstep(0.5, 1.0, d));
+      color = vec4(u_hot * a, a);
+    }`,
+  );
+  const beadLoc = loc(beadProgram, [...VIEW_NAMES, "u_size", "u_hot", "u_alpha", "a_pos"]);
   const cloudLoc = loc(cloudProgram, [...VIEW_NAMES, "u_extent", "u_density", "u_tints", "u_fade"]);
 
   // Graph data. Nodes are in runtime rank order; the first `ranked` clear the
@@ -371,16 +399,19 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     const edgePos = new Float32Array(edgeCount * 4);
     const ends = new Float32Array(edgeCount * 2);
     const kinds = new Float32Array(edgeCount * 2);
+    const lens = new Float32Array(edgeCount * 2);
     for (let k = 0; k < edgeCount; k++) {
       const a = pairs[2 * k],
         b = pairs[2 * k + 1];
       edgePos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * k);
       ends[2 * k + 1] = 1;
       kinds[2 * k] = kinds[2 * k + 1] = kind[k];
+      lens[2 * k] = lens[2 * k + 1] = Math.hypot(pos[2 * b] - pos[2 * a], pos[2 * b + 1] - pos[2 * a + 1]);
     }
     buffers.edgePos = buffer(edgePos);
     buffers.ends = buffer(ends);
     buffers.kinds = buffer(kinds);
+    buffers.lens = buffer(lens);
     buffers.edgeFocus = buffer(edgeFocus, gl.DYNAMIC_DRAW);
     buffers.spark = gl.createBuffer();
     if (graph.sky) {
@@ -388,6 +419,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       buffers.skyTints = gl.createTexture();
     }
     buffers.sparkAlpha = gl.createBuffer();
+    buffers.beads = gl.createBuffer();
   }
 
   // Each cell of the cloud grid in its cloud's tint, and the rest in plain
@@ -550,7 +582,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   let tracedCount = 0,
     tracedPos,
     tracedEnds,
-    tracedFocus;
+    tracedFocus,
+    tracedLens;
   function focus(origin) {
     nodeFocus.fill(0);
     edgeFocus.fill(0);
@@ -588,6 +621,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     tracedPos = new Float32Array(traced * 4);
     tracedEnds = new Float32Array(traced * 2);
     tracedFocus = new Float32Array(traced * 2);
+    tracedLens = new Float32Array(traced * 2);
     let t = 0;
     for (let k = 0; k < edgeCount; k++) {
       const f = edgeFocus[2 * k];
@@ -597,6 +631,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
       tracedPos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * t);
       tracedEnds[2 * t + 1] = 1;
       tracedFocus[2 * t] = tracedFocus[2 * t + 1] = f;
+      tracedLens[2 * t] = tracedLens[2 * t + 1] = Math.hypot(pos[2 * b] - pos[2 * a], pos[2 * b + 1] - pos[2 * a + 1]);
       t++;
     }
     // A few hundred traced lines can each be drawn strong; numpy's ten
@@ -611,7 +646,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
 
   function uploadFocus() {
     if (!buffers.tracedPos) {
-      for (const name of ["tracedPos", "tracedEnds", "tracedKinds", "tracedFocus"]) buffers[name] = gl.createBuffer();
+      for (const name of ["tracedPos", "tracedEnds", "tracedKinds", "tracedFocus", "tracedLens"])
+        buffers[name] = gl.createBuffer();
     }
     if (tracedCount) {
       for (const [name, data] of [
@@ -619,6 +655,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
         ["tracedEnds", tracedEnds],
         ["tracedKinds", new Float32Array(tracedCount * 2)],
         ["tracedFocus", tracedFocus],
+        ["tracedLens", tracedLens],
       ]) {
         gl.bindBuffer(gl.ARRAY_BUFFER, buffers[name]);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
@@ -926,12 +963,14 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     gl.uniform1f(edgeLoc.u_alpha, Math.min(0.14, 0.012 * zoomGrowth() ** 2));
     gl.uniform1f(edgeLoc.u_traceAlpha, traceAlpha);
     gl.uniform1f(edgeLoc.u_time, pass ? (now / 1400) % 1 : 0.5);
+    gl.uniform1f(edgeLoc.u_k, view.k);
     if (pass) {
       if (!tracedCount) return;
       attrib(edgeLoc.a_pos, buffers.tracedPos, 2);
       attrib(edgeLoc.a_end, buffers.tracedEnds, 1);
       attrib(edgeLoc.a_kind, buffers.tracedKinds, 1);
       attrib(edgeLoc.a_focus, buffers.tracedFocus, 1);
+      attrib(edgeLoc.a_len, buffers.tracedLens, 1);
       gl.drawArrays(gl.LINES, 0, tracedCount * 2);
       return;
     }
@@ -939,7 +978,39 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     attrib(edgeLoc.a_end, buffers.ends, 1);
     attrib(edgeLoc.a_kind, buffers.kinds, 1);
     attrib(edgeLoc.a_focus, buffers.edgeFocus, 1);
+    attrib(edgeLoc.a_len, buffers.lens, 1);
     gl.drawArrays(gl.LINES, 0, edgeCount * 2);
+  }
+
+  // The beads ride the downstream lines where the edge shader puts its pulse
+  // heads: every 140 or so pixels, at most twelve to a line, and capped in
+  // all so a hub's trace stays cheap to animate.
+  const MAX_BEADS = 6000;
+  const beadXY = new Float32Array(MAX_BEADS * 2);
+  function drawBeads(now) {
+    const phase = (now / 1400) % 1;
+    let n = 0;
+    for (let t = 0; t < tracedCount && n < MAX_BEADS; t++) {
+      if (tracedFocus[2 * t] <= 0) continue;
+      const repeat = Math.min(12, Math.max(1, Math.floor((tracedLens[2 * t] * view.k) / 140)));
+      const [ax, ay, bx, by] = tracedPos.subarray(4 * t, 4 * t + 4);
+      for (let j = 0; j < repeat && n < MAX_BEADS; j++) {
+        // 1 at the dependency, 0 at the dependent: a release travels outward.
+        const e = (j + 1 - phase) / repeat;
+        beadXY[2 * n] = ax + (bx - ax) * e;
+        beadXY[2 * n + 1] = ay + (by - ay) * e;
+        n++;
+      }
+    }
+    if (!n) return;
+    useProgram(beadProgram, beadLoc);
+    gl.uniform1f(beadLoc.u_size, (3 + zoomGrowth()) * dpr);
+    gl.uniform3fv(beadLoc.u_hot, colors.accent);
+    gl.uniform1f(beadLoc.u_alpha, Math.max(0.4, traceAlpha));
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.beads);
+    gl.bufferData(gl.ARRAY_BUFFER, beadXY.subarray(0, 2 * n), gl.STREAM_DRAW);
+    attrib(beadLoc.a_pos, buffers.beads, 2);
+    gl.drawArrays(gl.POINTS, 0, n);
   }
 
   function drawNodes(pass) {
@@ -1016,7 +1087,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     gl.enable(gl.BLEND);
 
     // Only what moves is drawn every frame.
-    if (selected >= 0 && moving()) drawEdges(1, now);
+    if (selected >= 0 && moving()) {
+      drawEdges(1, now);
+      drawBeads(now);
+    }
     drawSparks(now);
     updateHeat(now);
     if (litAt.size) drawNodes(1);
