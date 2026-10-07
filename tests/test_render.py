@@ -546,3 +546,41 @@ def test_clouds_can_be_switched_off(tmp_path: Path, payload: dict) -> None:
     )
     html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
     assert '<input id="clouds" type="checkbox" checked> Clouds' in html
+
+
+def test_rendering_without_a_graph_removes_an_earlier_cascade_page(
+    tmp_path: Path, payload: dict
+) -> None:
+    site = tmp_path / "site"
+    render.render_site(payload, site, rows=2, graph=_graph_file(tmp_path, payload))
+    render.render_site(payload, site, rows=2)
+    assert not (site / "cascade.html").exists()
+    assert not (site / "graph.json").exists()
+
+
+def test_a_graph_file_that_is_not_a_graph_is_refused(
+    tmp_path: Path, payload: dict
+) -> None:
+    source = tmp_path / "graph.json"
+    source.write_text("null\n", encoding="utf-8")
+    with pytest.raises(render.StaleGraphError, match="does not hold a graph"):
+        render.render_site(payload, tmp_path / "site", rows=2, graph=source)
+
+
+def test_the_self_reference_rule_is_stated_only_for_data_counted_that_way(
+    tmp_path: Path, payload: dict
+) -> None:
+    """October's payload counted self-references; its page must not deny it."""
+    older = {**payload, "counting": {"basis": "latest non-prerelease release"}}
+    render.render_site(older, tmp_path / "old", rows=2)
+    render.render_site(payload, tmp_path / "new", rows=2)
+    old = (tmp_path / "old" / "data.html").read_text(encoding="utf-8")
+    new = (tmp_path / "new" / "data.html").read_text(encoding="utf-8")
+    assert "its own dependent" not in old
+    assert "dependent &lt;&gt; dependency" not in old
+    assert "dependency_is_live\nGROUP BY dependency" in old
+    assert "its own dependent" in new
+    assert (
+        "dependency_is_live\n  AND dependent &lt;&gt; dependency\nGROUP BY dependency"
+        in new
+    )

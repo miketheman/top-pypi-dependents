@@ -147,6 +147,22 @@ def test_graph_starts_from_the_file_it_replaces(tmp_path: Path) -> None:
     assert (again["x"], again["y"]) == (fresh["x"], fresh["y"])
 
 
+@pytest.mark.parametrize(
+    "content", ['{"generated_at": "2026-09-01", "rows": []}', "{not json"]
+)
+def test_graph_refuses_a_previous_file_that_is_not_a_graph(
+    tmp_path: Path, content: str
+) -> None:
+    """The ranked payload named by mistake, or a damaged graph, exits cleanly."""
+    build_dir = _fixture_build_dir(tmp_path)
+    db = build_dir / "dependents.duckdb"
+    main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED])
+    previous = tmp_path / "previous.json"
+    previous.write_text(content, encoding="utf-8")
+    with pytest.raises(SystemExit, match="is not a graph; pass --fresh"):
+        main(["graph", "--database", str(db), "--previous", str(previous)])
+
+
 def test_graph_on_an_empty_database_exits(tmp_path: Path) -> None:
     db = tmp_path / "empty.duckdb"
     con = warehouse.connect(db)
@@ -404,3 +420,15 @@ def _run_artifacts(db: Path, out_json: Path) -> int:
             "5",
         ]
     )
+
+
+def test_graph_with_a_missing_previous_exits(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="pass --fresh"):
+        main(["graph", "--previous", str(tmp_path / "typo.json")])
+
+
+def test_a_missing_database_exits_without_creating_one(tmp_path: Path) -> None:
+    db = tmp_path / "typo.duckdb"
+    with pytest.raises(SystemExit, match="run `build` first"):
+        main(["graph", "--database", str(db)])
+    assert not db.exists()

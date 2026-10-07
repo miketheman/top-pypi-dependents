@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from datetime import UTC, datetime
@@ -15,6 +16,8 @@ from top_pypi_dependents.sources.fixture import FixtureSource
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
+
+    import duckdb
 
 LOGGER = logging.getLogger(__name__)
 
@@ -112,12 +115,28 @@ def _check_top_row_has_not_collapsed(
         raise warehouse.ImplausibleRunError(msg)
 
 
-def _artifacts(args: argparse.Namespace) -> int:
-    con = warehouse.connect(Path(args.database))
+def _open_snapshot(
+    database: str,
+) -> tuple[duckdb.DuckDBPyConnection, warehouse.Snapshot]:
+    """The database and its latest snapshot, or a clean exit saying why not.
+
+    Checked before connecting: DuckDB creates a missing file on connect, which
+    left an empty database behind a mistyped path and a traceback about a
+    missing table instead of an answer.
+    """
+    if not Path(database).exists():
+        msg = f"{database} not found; run `build` first"
+        raise SystemExit(msg)
+    con = warehouse.connect(Path(database))
     snapshot = warehouse.latest_snapshot(con)
     if snapshot is None:
         msg = "database contains no snapshots; run `build` first"
         raise SystemExit(msg)
+    return con, snapshot
+
+
+def _artifacts(args: argparse.Namespace) -> int:
+    con, snapshot = _open_snapshot(args.database)
     out = Path(args.output)
     with log.stage(LOGGER, "artifacts") as outcome:
         previous = artifacts.read_payload(out)
@@ -143,18 +162,38 @@ def _artifacts(args: argparse.Namespace) -> int:
     return 0
 
 
-def _graph(args: argparse.Namespace) -> int:
-    con = warehouse.connect(Path(args.database))
-    snapshot = warehouse.latest_snapshot(con)
-    if snapshot is None:
-        msg = "database contains no snapshots; run `build` first"
+def _previous_graph(path: Path) -> dict[str, Any] | None:
+    """Last month's graph, if there is one, or a clean exit if it is not a graph.
+
+    Only the names and positions are read, which every graph format has carried,
+    so an older format still seeds the layout. A damaged file, or the ranked
+    payload named by mistake, says so rather than raising a traceback.
+    """
+    try:
+        previous = artifacts.read_payload(path)
+    except json.JSONDecodeError:
+        previous = {}
+    if previous is not None and not (
+        isinstance(previous, dict)
+        and all(isinstance(previous.get(key), list) for key in ("names", "x", "y"))
+    ):
+        msg = f"{path} is not a graph; pass --fresh to lay out from scratch"
         raise SystemExit(msg)
+    return previous
+
+
+def _graph(args: argparse.Namespace) -> int:
     out = Path(args.output)
     # Last month's map, which this month's starts from: the file about to be
-    # overwritten, unless another is named or a fresh layout is asked for.
+    # overwritten, unless another is named or a fresh layout is asked for. A
+    # named one that is not there is a mistake, not a fresh start.
+    if args.previous and not args.fresh and not Path(args.previous).exists():
+        msg = f"{args.previous} not found; pass --fresh to lay out from scratch"
+        raise SystemExit(msg)
+    con, snapshot = _open_snapshot(args.database)
     previous = None
     if not args.fresh:
-        previous = artifacts.read_payload(Path(args.previous) if args.previous else out)
+        previous = _previous_graph(Path(args.previous) if args.previous else out)
     with log.stage(LOGGER, "graph") as outcome:
         payload = graph.build_graph(
             con,

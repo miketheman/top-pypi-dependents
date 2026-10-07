@@ -703,13 +703,32 @@
     target.resolved = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.resolved);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target.texture, 0);
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    if (!complete || gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      fail("This display is too large for the graph's drawing buffer. A smaller window may work.");
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  // Said where the status line was, visibly: the graph will not draw.
+  function fail(message) {
+    statusLine.textContent = message;
+    statusLine.classList.remove("sr-only");
+    graph = null;
+  }
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    fail("The graph's drawing surface was lost. Reload the page to draw it again.");
+  });
+
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = surface.getBoundingClientRect();
     width = rect.width; height = rect.height;
+    // Sharp on a high-density screen, but capped near sixteen million pixels:
+    // the multisampled buffer is four times that, and a 5K display at full
+    // density would ask for half a gigabyte.
+    dpr = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(16e6 / Math.max(width * height, 1)));
     for (const c of [canvas, labels]) { c.width = Math.round(width * dpr); c.height = Math.round(height * dpr); }
     makeTarget();
     if (graph) {
@@ -765,6 +784,7 @@
   let selected = -1;
   let trace = null;
   let traceAlpha = 1;
+  let tracedCount = 0, tracedPos, tracedEnds, tracedFocus;
   function focus(origin) {
     nodeFocus.fill(0);
     edgeFocus.fill(0);
@@ -789,6 +809,22 @@
       edgeFocus[2 * k] = edgeFocus[2 * k + 1] = f;
       if (f) traced++;
     }
+    // The animated pass draws only these: drawing all 380,000 edges every
+    // frame to discard most of them undid the point of caching the still graph.
+    tracedCount = traced;
+    tracedPos = new Float32Array(traced * 4);
+    tracedEnds = new Float32Array(traced * 2);
+    tracedFocus = new Float32Array(traced * 2);
+    let t = 0;
+    for (let k = 0; k < edgeCount; k++) {
+      const f = edgeFocus[2 * k];
+      if (!f || (!extras && kind[k])) continue;
+      const a = pairs[2 * k], b = pairs[2 * k + 1];
+      tracedPos.set([pos[2 * a], pos[2 * a + 1], pos[2 * b], pos[2 * b + 1]], 4 * t);
+      tracedEnds[2 * t + 1] = 1;
+      tracedFocus[2 * t] = tracedFocus[2 * t + 1] = f;
+      t++;
+    }
     // A few hundred traced lines can each be drawn strong; numpy's ten
     // thousand would be a solid green disc, so they thin as they multiply.
     traceAlpha = Math.min(1, Math.sqrt(400 / Math.max(traced, 1)));
@@ -800,6 +836,16 @@
   }
 
   function uploadFocus() {
+    if (!buffers.tracedPos) {
+      for (const name of ["tracedPos", "tracedEnds", "tracedKinds", "tracedFocus"]) buffers[name] = gl.createBuffer();
+    }
+    if (tracedCount) {
+      for (const [name, data] of [["tracedPos", tracedPos], ["tracedEnds", tracedEnds],
+        ["tracedKinds", new Float32Array(tracedCount * 2)], ["tracedFocus", tracedFocus]]) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers[name]);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      }
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nodeFocus);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeFocus);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.edgeFocus);
@@ -1004,6 +1050,15 @@
     gl.uniform1f(edgeLoc.u_alpha, Math.min(0.14, 0.012 * zoomGrowth() ** 2));
     gl.uniform1f(edgeLoc.u_traceAlpha, traceAlpha);
     gl.uniform1f(edgeLoc.u_time, pass ? (now / 1400) % 1 : 0.5);
+    if (pass) {
+      if (!tracedCount) return;
+      attrib(edgeLoc.a_pos, buffers.tracedPos, 2);
+      attrib(edgeLoc.a_end, buffers.tracedEnds, 1);
+      attrib(edgeLoc.a_kind, buffers.tracedKinds, 1);
+      attrib(edgeLoc.a_focus, buffers.tracedFocus, 1);
+      gl.drawArrays(gl.LINES, 0, tracedCount * 2);
+      return;
+    }
     attrib(edgeLoc.a_pos, buffers.edgePos, 2);
     attrib(edgeLoc.a_end, buffers.ends, 1);
     attrib(edgeLoc.a_kind, buffers.kinds, 1);
@@ -1120,7 +1175,12 @@
     const fill = (subset) => {
       list.replaceChildren(...subset.map((i) => {
         const button = el("button", { type: "button", className: "jump", textContent: names[i] });
-        button.addEventListener("click", () => select(i, { fly: true }));
+        // The panel is rebuilt for the new selection, taking this button with
+        // it; focus moves to the new project's name rather than to the page.
+        button.addEventListener("click", () => {
+          select(i, { fly: true });
+          $("detail-name")?.focus();
+        });
         return el("li", {}, button, el("span", { className: "meta", textContent: fmt(dependentsOf(i)) }));
       }));
     };
@@ -1132,6 +1192,9 @@
       more.addEventListener("click", () => {
         fill(items);
         moreItem.remove();
+        // The button removes itself, so focus moves to the first name it
+        // revealed, or to the filter when there is one.
+        list.children[LIST_LIMIT]?.querySelector("button")?.focus();
         if (items.length > 50) {
           const filter = el("input", { type: "search", placeholder: `Filter ${heading.toLowerCase()}`, autocomplete: "off" });
           filter.setAttribute("aria-label", `Filter ${heading.toLowerCase()}`);
@@ -1154,7 +1217,8 @@
     link.setAttribute("aria-describedby", "new-tab");
     const close = el("button", { type: "button", className: "icon", textContent: "×" });
     close.setAttribute("aria-label", "Clear the selection");
-    close.addEventListener("click", () => select(-1));
+    // Closing removes the panel and this button; focus returns to the graph.
+    close.addEventListener("click", () => { select(-1); surface.focus(); });
     const rank = rankText(i);
     detail.replaceChildren(
       el("div", { className: "detail-head" }, link, close),
@@ -1194,7 +1258,10 @@
       // On a narrow screen the selection sheet covers the bottom of the graph,
       // so the trace is framed in the space above it.
       const sheet = narrow.matches ? detail.offsetHeight : 0;
-      const fitK = 0.7 * Math.min(width / Math.max(x1 - x0, 1), (height - sheet) / Math.max(y1 - y0, 1));
+      // A trace of one -- a rim project, with no drawn neighbors -- has no
+      // extent to fit, so it is framed with some sky around it.
+      const least = graph.extent * 0.04;
+      const fitK = 0.7 * Math.min(width / Math.max(x1 - x0, least), (height - sheet) / Math.max(y1 - y0, least));
       view.k = Math.min(home.k * 400, Math.max(home.k, fitK));
       view.cx = (x0 + x1) / 2;
       view.cy = (y0 + y1) / 2 + sheet / 2 / view.k;
@@ -1217,7 +1284,12 @@
   const local = (e) => { const r = surface.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   const spread = () => { const [a, b] = [...pointers.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]); };
 
+  // Only a primary press or a lone finger selects: a right-click opens the
+  // menu, and a two-finger tap is a gesture, not a choice.
+  let multiTouch = false;
   surface.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (pointers.size >= 1) multiTouch = true;
     surface.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, local(e));
     pressedAt = local(e);
@@ -1263,8 +1335,10 @@
     tip.style.top = `${sy + 14 + tip.offsetHeight > height ? sy - tip.offsetHeight - 10 : sy + 14}px`;
   });
   const release = (e) => {
-    const wasClick = pointers.size === 1 && !movedPointer;
+    if (!pointers.has(e.pointerId)) return;
+    const wasClick = pointers.size === 1 && !movedPointer && !multiTouch;
     pointers.delete(e.pointerId);
+    if (!pointers.size) multiTouch = false;
     if (pointers.size < 2) pinchFrom = null;
     surface.classList.remove("dragging");
     if (wasClick && e.type === "pointerup" && graph) select(nodeAt(...local(e)));
@@ -1400,10 +1474,11 @@
       await yieldToMain();
       buildIndexes(data);
       await yieldToMain();
-      // Assigned only once indexed: until then, input handlers see no graph.
+      // Assigned only once indexed, and nothing yields from here to the end of
+      // setMode: a frame or handler that sees a graph must also see the camera
+      // and adjacency it reads.
       graph = data;
       upload();
-      await yieldToMain();
       resize();
       fit();
       setMode(extrasToggle.checked);

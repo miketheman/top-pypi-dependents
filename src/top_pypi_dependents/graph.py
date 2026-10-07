@@ -127,21 +127,41 @@ def _layout_graph(
 SEED_RADIUS = 600.0
 
 
+def _center_and_radius(
+    points: Sequence[tuple[float, float]],
+) -> tuple[float, float, float]:
+    """The centroid, and the radius holding all but the farthest half percent.
+
+    The last half percent are small components DrL flings far out; scaling to
+    them would shrink everything else to a speck.
+    """
+    cx = sum(x for x, _ in points) / len(points)
+    cy = sum(y for _, y in points) / len(points)
+    distances = sorted(math.hypot(x - cx, y - cy) for x, y in points)
+    return cx, cy, distances[int(len(distances) * 0.995)] or 1.0
+
+
 def align(
     points: list[tuple[float, float]],
     targets: Sequence[tuple[float, float] | None],
 ) -> list[tuple[float, float]]:
-    """Rotate or reflect ``points`` about the origin to best match ``targets``.
+    """Turn, mirror and shift ``points`` to best match ``targets``.
 
     A force layout has no up: run twice, it can come back turned or mirrored
-    even when every neighborhood is the same. Where a point has a target, the
-    turn that best lines the two up is applied to every point. Rotation keeps
-    each point's distance from the origin, so nothing leaves the disc it was
-    scaled into. Points without a target only follow the turn.
+    even when every neighborhood is the same. Both sets are centered on the
+    points that have a target -- new projects would otherwise drag the center
+    and bias the fit -- and the turn that best lines them up is applied to
+    every point, then moved onto the targets' center. Points without a target
+    only follow along.
     """
     pairs = [(p, t) for p, t in zip(points, targets, strict=True) if t is not None]
     if not pairs:
         return points
+    px = sum(x for (x, _), _ in pairs) / len(pairs)
+    py = sum(y for (_, y), _ in pairs) / len(pairs)
+    tx0 = sum(x for _, (x, _) in pairs) / len(pairs)
+    ty0 = sum(y for _, (_, y) in pairs) / len(pairs)
+    pairs = [((x - px, y - py), (tx - tx0, ty - ty0)) for (x, y), (tx, ty) in pairs]
     best: tuple[float, float, float] | None = None
     for flip in (1.0, -1.0):
         dot = sum(x * tx + flip * y * ty for (x, y), (tx, ty) in pairs)
@@ -154,10 +174,16 @@ def align(
             best = (fit, flip, angle)
     _, flip, angle = best
     cos, sin = math.cos(angle), math.sin(angle)
-    return [(cos * x - sin * flip * y, sin * x + cos * flip * y) for x, y in points]
+    return [
+        (
+            cos * (x - px) - sin * flip * (y - py) + tx0,
+            sin * (x - px) + cos * flip * (y - py) + ty0,
+        )
+        for x, y in points
+    ]
 
 
-def _seed(
+def seed_positions(
     graph: igraph.Graph,
     vertices: list[int],
     count: int,
@@ -165,33 +191,30 @@ def _seed(
 ) -> list[tuple[float, float]]:
     """Starting positions for DrL: last month's, where there is one.
 
-    A new project starts at its placed neighbors' centroid and a family hub at
-    its members'; anything with neither starts at the middle.
+    A family hub starts at its known members' centroid; a new project at the
+    centroid of its placed neighbors, hubs included, so a new family member
+    with no edges of its own still starts beside its family. Anything with
+    neither starts at the middle.
     """
-    cx = sum(x for x, _ in known.values()) / len(known)
-    cy = sum(y for _, y in known.values()) / len(known)
-    distances = sorted(math.hypot(x - cx, y - cy) for x, y in known.values())
-    radius = distances[int(len(distances) * 0.995)] or 1.0
+    cx, cy, radius = _center_and_radius(list(known.values()))
     scaled = {
         v: ((x - cx) / radius * SEED_RADIUS, (y - cy) / radius * SEED_RADIUS)
         for v, (x, y) in known.items()
     }
-    seed = []
+
+    def centroid(v: int) -> tuple[float, float] | None:
+        near = [scaled[u] for u in graph.neighbors(v) if u in scaled]
+        if not near:
+            return None
+        return (
+            sum(x for x, _ in near) / len(near),
+            sum(y for _, y in near) / len(near),
+        )
+
     for v in vertices:
-        if v in scaled:
-            seed.append(scaled[v])
-            continue
-        near = [scaled[u] for u in graph.neighbors(v) if u in scaled and u < count]
-        if near:
-            seed.append(
-                (
-                    sum(x for x, _ in near) / len(near),
-                    sum(y for _, y in near) / len(near),
-                )
-            )
-        else:
-            seed.append((0.0, 0.0))
-    return seed
+        if v >= count and (spot := centroid(v)) is not None:
+            scaled[v] = spot
+    return [scaled.get(v) or centroid(v) or (0.0, 0.0) for v in vertices]
 
 
 def layout(
@@ -222,19 +245,26 @@ def layout(
     graph.vs["node"] = range(graph.vcount())
     vertices = [v for v in range(graph.vcount()) if graph.degree(v)]
     linked = graph.induced_subgraph(vertices)
+    # Last month's rim band is ordered by rank, not by anything structural, so
+    # a project that sat there gives no hint where it belongs now.
+    rim = BELT_INNER * EXTENT
     known = {
         i: previous[name]
         for i, name in enumerate(names)
-        if previous and name in previous and graph.degree(i)
+        if previous
+        and name in previous
+        and graph.degree(i)
+        and math.hypot(previous[name][0] - EXTENT / 2, previous[name][1] - EXTENT / 2)
+        < rim
     }
 
     # igraph draws from one process-wide generator, so it is seeded for the
     # layout and handed back after; that is what makes a month's layout
-    # repeatable. DrL took about a minute on the October 2026 graph against
+    # repeatable. DrL took about 90 seconds on the October 2026 graph against
     # Fruchterman-Reingold's 3 seconds, and earns it: FR drew one blob.
     igraph.set_random_number_generator(random.Random(SEED))  # noqa: S311 -- a layout seed, not a secret
     try:
-        seed = _seed(graph, vertices, count, known) if known else None
+        seed = seed_positions(graph, vertices, count, known) if known else None
         coords = linked.layout_drl(weights="weight", seed=seed)
     finally:
         igraph.set_random_number_generator(random)
@@ -246,13 +276,8 @@ def layout(
     core, inner, outer = 0.42 * EXTENT, BELT_INNER * EXTENT, 0.5 * EXTENT
     positions = [(center, center)] * count
     if placed:
-        cx = sum(x for x, _ in placed.values()) / len(placed)
-        cy = sum(y for _, y in placed.values()) / len(placed)
-        distances = sorted(math.hypot(x - cx, y - cy) for x, y in placed.values())
-        # The last half percent are small components DrL flings far out.
-        # Scaling to them would shrink the core to a speck, so they are pulled
-        # onto the rim instead.
-        radius = distances[int(len(distances) * 0.995)] or 1.0
+        # The outliers past the radius are pulled onto the core's rim.
+        cx, cy, radius = _center_and_radius(list(placed.values()))
         nodes = list(placed)
         disc = []
         for node in nodes:
@@ -267,7 +292,10 @@ def layout(
             for node in nodes
         ]
         for node, (x, y) in zip(nodes, align(disc, targets), strict=True):
-            positions[node] = (center + x, center + y)
+            # The shift that lines up last month's map can nudge a few points
+            # past the core's edge; they stay on it, clear of the rim band.
+            reach = max(1.0, math.hypot(x, y) / core)
+            positions[node] = (center + x / reach, center + y / reach)
 
     # A sunflower spiral fills the band at even density whatever its count.
     alone = [i for i in range(count) if i not in placed]

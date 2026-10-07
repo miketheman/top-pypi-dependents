@@ -54,9 +54,15 @@ jobs:
         run: uv sync
 
       - name: Render
+        # The monthly run removes data/graph.json when its layout fails, so the
+        # cascade page is rendered only when the graph is there.
         run: |
-          uv run top-pypi-dependents render --payload data/latest.json \
-            --graph data/graph.json --output site
+          if [ -f data/graph.json ]; then
+            uv run top-pypi-dependents render --payload data/latest.json \
+              --graph data/graph.json --output site
+          else
+            uv run top-pypi-dependents render --payload data/latest.json --output site
+          fi
 
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

@@ -85,6 +85,9 @@ def build_payload(
         "source": snapshot.source,
         "counting": {
             "basis": "latest non-prerelease release",
+            # Recorded because it changed: payloads before November 2026 counted
+            # a project's references to its own extras as a dependent.
+            "self_references": "excluded",
             "ranked_on": "runtime",
             "min_dependents": min_dependents,
         },

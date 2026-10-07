@@ -27,8 +27,10 @@ full dependency graph &mdash; every declared edge, not just the ranked totals.</
       <code>zope-interface</code> are one project.</li>
   <li>Only projects still live on PyPI are ranked, and only live projects count as
       dependents.</li>
+  {% if self_references_excluded %}
   <li>No project counts as its own dependent. <code>foo[all]</code> requiring
       <code>foo[x]</code> is how extras compose, not a dependency.</li>
+  {% endif %}
 </ul>
 
 <h2>Known limitations</h2>
@@ -72,6 +74,9 @@ ranking on its own &mdash; no database needed. With the
 <pre><code>SELECT dependency, count(DISTINCT dependent) AS dependents
 FROM 'edges-{{ asset_month }}.parquet'
 WHERE is_runtime AND dependent_is_live AND dependency_is_live
+{% if self_references_excluded %}
+  AND dependent &lt;&gt; dependency
+{% endif %}
 GROUP BY dependency
 ORDER BY dependents DESC
 LIMIT 10;</code></pre>

@@ -122,18 +122,20 @@ def render_site(
     another month's snapshot would otherwise be published under this month's
     footer, with last month's ranks and counts.
     """
-    graph_bytes = graph.read_bytes() if graph is not None else None
-    graph_data = json.loads(graph_bytes) if graph_bytes is not None else None
-    if (
-        graph_data is not None
-        and graph_data.get("generated_at") != payload["generated_at"]
-    ):
-        msg = (
-            f"{graph} was generated at {graph_data.get('generated_at')}, but the "
-            f"payload at {payload['generated_at']}; rebuild it with `graph` from "
-            f"the same database"
-        )
-        raise StaleGraphError(msg)
+    graph_bytes = graph_data = None
+    if graph is not None:
+        graph_bytes = graph.read_bytes()
+        graph_data = json.loads(graph_bytes)
+        if not isinstance(graph_data, dict):
+            msg = f"{graph} does not hold a graph; rebuild it with `graph`"
+            raise StaleGraphError(msg)
+        if graph_data.get("generated_at") != payload["generated_at"]:
+            msg = (
+                f"{graph} was generated at {graph_data.get('generated_at')}, but "
+                f"the payload at {payload['generated_at']}; rebuild it with "
+                f"`graph` from the same database"
+            )
+            raise StaleGraphError(msg)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _environment()
@@ -148,6 +150,11 @@ def render_site(
         # not since `min_dependents` started cutting the single-dependent tail.
         "row_count": len(payload["rows"]),
         "min_dependents": payload.get("counting", {}).get("min_dependents", 1),
+        # Stated, and queried for, only where the payload was counted that way;
+        # older payloads counted self-references and must not be described as
+        # if they had not.
+        "self_references_excluded": payload.get("counting", {}).get("self_references")
+        == "excluded",
         # Release assets are named for the month they cover, so the example
         # queries derive it rather than hardcoding a month that goes stale on
         # the next run.
@@ -179,7 +186,12 @@ def render_site(
         encoding="utf-8",
     )
 
-    if graph_bytes is not None and graph_data is not None:
+    if graph_bytes is None or graph_data is None:
+        # A site rendered earlier with a graph would otherwise keep a cascade
+        # page the nav no longer links, drawing another snapshot's graph.
+        for stale in ("cascade.html", "graph.json"):
+            (out_dir / stale).unlink(missing_ok=True)
+    else:
         # Copied verbatim: `graph` already wrote it compact, and the page is
         # what reads it.
         (out_dir / "graph.json").write_bytes(graph_bytes)

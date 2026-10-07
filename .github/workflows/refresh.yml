@@ -91,19 +91,42 @@ jobs:
             --database build/dependents.duckdb \
             --output data/latest.json \
             --edges "build/edges-${MONTH}.parquet"
-          # Before the rename below: `graph` reads the database by its default
-          # name. Committed beside data/latest.json so `site.yml` can render
-          # the cascade page without the database.
+
+      # The cascade page is the optional part of the run. If laying out the
+      # graph fails, the month's ranking, release and site still ship -- only
+      # without the cascade page -- rather than throwing away a billable query.
+      # Committed beside data/latest.json so `site.yml` can render it too.
+      - name: Graph
+        id: graph
+        if: inputs.dry_run != true
+        continue-on-error: true
+        run: |
           uv run top-pypi-dependents graph \
             --database build/dependents.duckdb \
             --output data/graph.json
-          mv build/dependents.duckdb "build/dependents-${MONTH}.duckdb"
 
+      - name: Name the database for the release
+        if: inputs.dry_run != true
+        env:
+          MONTH: ${{ steps.stamp.outputs.month }}
+        run: mv build/dependents.duckdb "build/dependents-${MONTH}.duckdb"
+
+      # A failed graph leaves last month's data/graph.json behind, which render
+      # rightly refuses as stale. It is removed, so this run and `site.yml`
+      # both render without the cascade page until next month.
       - name: Render
         if: inputs.dry_run != true
+        env:
+          GRAPH_OUTCOME: ${{ steps.graph.outcome }}
         run: |
-          uv run top-pypi-dependents render --payload data/latest.json \
-            --graph data/graph.json --output site
+          if [ "${GRAPH_OUTCOME}" = "success" ]; then
+            uv run top-pypi-dependents render --payload data/latest.json \
+              --graph data/graph.json --output site
+          else
+            echo "::warning::graph failed; publishing without the cascade page"
+            rm -f data/graph.json
+            uv run top-pypi-dependents render --payload data/latest.json --output site
+          fi
 
       - name: Commit the ranked JSON
         if: inputs.dry_run != true
@@ -115,8 +138,10 @@ jobs:
           # The data files start each run untracked or unchanged; `git diff`
           # against the worktree can't see either case, so stage first and
           # test the index instead.
-          git add data/latest.json data/graph.json
-          if git diff --cached --quiet -- data/latest.json data/graph.json; then
+          # The whole directory, with -A: a graph removed after a failed layout
+          # is staged as removed, and naming a file that is absent would fail.
+          git add -A data
+          if git diff --cached --quiet -- data; then
             echo "No ranking change; nothing to commit."
           else
             git commit -m "Refresh rankings for ${MONTH}"

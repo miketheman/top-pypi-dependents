@@ -341,3 +341,34 @@ def test_neighboring_clouds_get_different_tints() -> None:
     assert tints[0] != tints[1]
     assert len(sky["cells"]) == graph.CLOUD_GRID**2
     assert set(sky["cells"]) == {0, 1, 2}
+
+
+def test_a_new_family_member_starts_beside_its_family() -> None:
+    """odoo-new has no edges of its own; its family hub knows where to put it."""
+    names = ["odoo14-a", "odoo12-b", "odoo-new", "numpy", "pandas"]
+    edges = [(4, 3)]
+    layout_graph, _ = graph._layout_graph(names, edges, [])  # noqa: SLF001
+    vertices = [v for v in range(layout_graph.vcount()) if layout_graph.degree(v)]
+    known = {
+        0: (9000.0, 5000.0),
+        1: (9100.0, 5000.0),
+        3: (1000.0, 5000.0),
+        4: (1100.0, 5000.0),
+    }
+    seeds = dict(
+        zip(
+            vertices,
+            graph.seed_positions(layout_graph, vertices, 5, known),
+            strict=True,
+        )
+    )
+    family = (seeds[0][0] + seeds[1][0]) / 2
+    assert abs(seeds[2][0] - family) < 1.0
+
+
+def test_align_undoes_a_shift_as_well_as_a_turn() -> None:
+    target = [(3.0, 0.0), (0.0, 1.0), (-2.0, -1.0), (1.0, 2.0)]
+    moved = [(-y + 50.0, x - 20.0) for x, y in target]
+    for (x, y), (tx, ty) in zip(graph.align(moved, target), target, strict=True):
+        assert math.isclose(x, tx, abs_tol=1e-9)
+        assert math.isclose(y, ty, abs_tol=1e-9)

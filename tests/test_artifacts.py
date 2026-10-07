@@ -39,6 +39,7 @@ def test_payload_header_fields(con_and_snapshot: ConAndSnapshot) -> None:
     assert payload["generated_at"] == "2026-09-01T00:00:00+00:00"
     assert payload["counting"] == {
         "basis": "latest non-prerelease release",
+        "self_references": "excluded",
         "ranked_on": "runtime",
         "min_dependents": 1,
     }
