@@ -194,8 +194,8 @@ prek run --all-files  # the git-hook gate; must pass on a clean clone
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 211 passed, 3 skipped
-uv sync --group bigquery       # 214 passed, 0 skipped
+uv sync                        # 217 passed, 3 skipped
+uv sync --group bigquery       # 220 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
@@ -242,6 +242,13 @@ Do not add prose below the stage; the method lives in the collapsible Key and on
 `generated_at` and refuses a mismatch before writing anything, because a stale graph
 would publish last month's ranks under this month's footer. `graph` runs before the
 Artifacts step renames the database in `refresh.yml`.
+
+**Raise `GRAPH_VERSION` whenever graph.json's shape changes.** `render` refuses a graph
+of any other version, which is what stops `site.yml` -- republishing the committed
+graph with the newest templates -- from shipping a page script that expects fields the
+file lacks. A format change therefore has to regenerate and commit `data/graph.json`
+in the same change; `graph --previous` still seeds from an older format, since it reads
+only names and positions.
 
 **The graph's node set counts extras; its first `ranked` nodes do not.** Nodes are
 every project with `dependents_all >= min`, in runtime rank order, so the runtime set

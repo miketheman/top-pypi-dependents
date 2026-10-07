@@ -49,7 +49,8 @@ on each <a href="https://github.com/miketheman/top-pypi-dependents/releases" tar
 {% if has_cascade %}
 <p>The <a href="cascade.html">cascade page</a> draws <a href="graph.json">graph.json</a>:
 every project with enough dependents to be drawn, laid out, and the dependencies
-between them. Its nodes are parallel arrays in runtime rank order. Each edge list gives
+between them. <code>version</code> is the file's format, raised whenever a field
+changes. Its nodes are parallel arrays in runtime rank order. Each edge list gives
 every node's number of dependencies in <code>degree</code>, then in <code>gaps</code>
 the differences between that node's sorted dependency indices, counted from zero;
 <code>extra_edges</code> holds the pairs declared only behind an extra.

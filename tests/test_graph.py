@@ -13,6 +13,7 @@ def test_nodes_are_the_ranked_projects_in_rank_order(
 ) -> None:
     con, snapshot_id = con_and_snapshot
     payload = graph.build_graph(con, snapshot_id, min_dependents=1)
+    assert payload["version"] == graph.GRAPH_VERSION
     assert payload["names"] == ["requests", "django", "urllib3", "pytest"]
     assert payload["dependents"] == [6, 1, 1, 0]
     assert payload["dependents_all"] == [6, 1, 1, 1]

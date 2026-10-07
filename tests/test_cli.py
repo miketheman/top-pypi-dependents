@@ -201,10 +201,11 @@ def test_render_refuses_a_graph_from_another_snapshot(tmp_path: Path) -> None:
     main(["build", "--input", str(build_dir), "--database", str(db), *RELAXED])
     main(["artifacts", "--database", str(db), "--output", str(out_json)])
     graph_json.write_text(
-        '{"generated_at": "2026-08-01T00:00:00+00:00", "min_dependents": 2}',
+        '{"version": 1, "generated_at": "2026-08-01T00:00:00+00:00", '
+        '"min_dependents": 2}',
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="rebuild it with `graph`"):
+    with pytest.raises(SystemExit, match="was generated at"):
         main(
             [
                 "render",

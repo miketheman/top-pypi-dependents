@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from top_pypi_dependents import artifacts, render
+from top_pypi_dependents.graph import GRAPH_VERSION, encode_edges
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -458,8 +459,18 @@ def test_the_cascade_page_is_only_rendered_with_a_graph(
 
 
 def _graph_file(tmp_path: Path, payload: dict, **fields: object) -> Path:
+    """A minimal graph: requests, with one drawn dependent and one not."""
     source = tmp_path / "graph.json"
-    graph = {"generated_at": payload["generated_at"], "min_dependents": 3, **fields}
+    graph = {
+        "version": GRAPH_VERSION,
+        "generated_at": payload["generated_at"],
+        "min_dependents": 3,
+        "ranked": 2,
+        "names": ["requests", "httpx", "leaf"],
+        "dependents": [12, 0, 0],
+        "edges": encode_edges([(1, 0), (2, 0)], 3),
+        **fields,
+    }
     source.write_text(json.dumps(graph) + "\n", encoding="utf-8")
     return source
 
@@ -608,3 +619,45 @@ def test_the_self_reference_rule_is_stated_only_for_data_counted_that_way(
         "dependency_is_live\n  AND dependent &lt;&gt; dependency\nGROUP BY dependency"
         in new
     )
+
+
+def test_a_graph_in_another_format_is_refused_before_writing(
+    tmp_path: Path, payload: dict
+) -> None:
+    """The page script reads one format; an old committed graph must not ship
+    beside a newer one."""
+    source = _graph_file(tmp_path, payload, version=GRAPH_VERSION - 1)
+    site = tmp_path / "site"
+    with pytest.raises(render.StaleGraphError, match="graph format"):
+        render.render_site(payload, site, rows=2, graph=source)
+    assert not site.exists()
+
+
+def test_the_key_counts_the_top_projects_drawn_dependents(
+    tmp_path: Path, payload: dict
+) -> None:
+    """Derived from the graph, so it cannot go stale the way a typed number did:
+    of requests' 12, only httpx clears the bar -- leaf ranks only with extras."""
+    render.render_site(
+        payload, tmp_path / "site", rows=2, graph=_graph_file(tmp_path, payload)
+    )
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert (
+        "requests has 12 dependents, and the 1 drawn are those with at least 3" in html
+    )
+
+
+def test_an_empty_graph_names_no_project_in_the_key(
+    tmp_path: Path, payload: dict
+) -> None:
+    source = _graph_file(
+        tmp_path,
+        payload,
+        names=[],
+        dependents=[],
+        ranked=0,
+        edges=encode_edges([], 0),
+    )
+    render.render_site(payload, tmp_path / "site", rows=2, graph=source)
+    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
+    assert "drawn dependents, not every one." in html

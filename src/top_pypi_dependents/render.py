@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
+from top_pypi_dependents.graph import GRAPH_VERSION, decode_edges
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -141,7 +143,57 @@ def _environment() -> Environment:
 
 
 class StaleGraphError(ValueError):
-    """The graph was built from a different snapshot than the payload."""
+    """The graph cannot be published with this payload or these pages."""
+
+
+def _read_graph(path: Path, payload: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    """The graph file's bytes, and what the cascade page says about it.
+
+    Everything is read and checked here, before a single file is written: a
+    graph in another format would break the page script published beside it,
+    and one built from another month's snapshot would be published under this
+    month's footer, with last month's ranks and counts.
+    """
+    content = path.read_bytes()
+    data = json.loads(content)
+    if not isinstance(data, dict):
+        msg = f"{path} does not hold a graph; rebuild it with `graph`"
+        raise StaleGraphError(msg)
+    if data.get("version") != GRAPH_VERSION:
+        msg = (
+            f"{path} is graph format {data.get('version')}, and these pages read "
+            f"format {GRAPH_VERSION}; rebuild it with `graph`"
+        )
+        raise StaleGraphError(msg)
+    if data["generated_at"] != payload["generated_at"]:
+        msg = (
+            f"{path} was generated at {data['generated_at']}, but the payload "
+            f"at {payload['generated_at']}; rebuild it with `graph` from the "
+            f"same database"
+        )
+        raise StaleGraphError(msg)
+    # The key's example of a trace stopping short: the top project's runtime
+    # dependents, and how many of them clear the bar to be drawn.
+    hub = None
+    if data["names"]:
+        drawn = sum(
+            1
+            for dependent, dependency in decode_edges(data["edges"])
+            if dependency == 0 and dependent < data["ranked"]
+        )
+        hub = {
+            "name": data["names"][0],
+            "dependents": data["dependents"][0],
+            "drawn": drawn,
+        }
+    return content, {
+        # The graph's own threshold, which can differ from the ranking's and
+        # counts extras: the drawn set is every project that clears it once
+        # extras count.
+        "graph_min_dependents": data["min_dependents"],
+        "graph_url": _versioned("graph.json", content),
+        "hub": hub,
+    }
 
 
 def render_site(
@@ -156,24 +208,9 @@ def render_site(
     ``rows`` is how many ranked projects the page lists; the search index
     covers the rest. With a ``graph`` file, the cascade page is rendered too.
 
-    The graph is read and checked before anything is written. One built from
-    another month's snapshot would otherwise be published under this month's
-    footer, with last month's ranks and counts.
+    The graph is read and checked before anything is written.
     """
-    graph_bytes = graph_data = None
-    if graph is not None:
-        graph_bytes = graph.read_bytes()
-        graph_data = json.loads(graph_bytes)
-        if not isinstance(graph_data, dict):
-            msg = f"{graph} does not hold a graph; rebuild it with `graph`"
-            raise StaleGraphError(msg)
-        if graph_data.get("generated_at") != payload["generated_at"]:
-            msg = (
-                f"{graph} was generated at {graph_data.get('generated_at')}, but "
-                f"the payload at {payload['generated_at']}; rebuild it with "
-                f"`graph` from the same database"
-            )
-            raise StaleGraphError(msg)
+    cascade = None if graph is None else _read_graph(graph, payload)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _environment()
@@ -199,7 +236,7 @@ def render_site(
         # the next run.
         "asset_month": _asset_month(payload["generated_at"]),
         "payload_shape": _payload_shape(payload),
-        "has_cascade": graph_data is not None,
+        "has_cascade": cascade is not None,
         "asset": assets.__getitem__,
         "importmap": _importmap(assets),
     }
@@ -229,7 +266,7 @@ def render_site(
         encoding="utf-8",
     )
 
-    if graph_bytes is None or graph_data is None:
+    if cascade is None:
         # A site rendered earlier with a graph would otherwise keep a cascade
         # page the nav no longer links, drawing another snapshot's graph.
         for stale in ("cascade.html", "graph.json"):
@@ -237,16 +274,11 @@ def render_site(
     else:
         # Copied verbatim: `graph` already wrote it compact, and the page is
         # what reads it.
-        (out_dir / "graph.json").write_bytes(graph_bytes)
+        content, context = cascade
+        (out_dir / "graph.json").write_bytes(content)
         (out_dir / "cascade.html").write_text(
             env.get_template("cascade.html.j2").render(
-                page="cascade",
-                # The graph's own threshold, which can differ from the
-                # ranking's and counts extras: the drawn set is every project
-                # that clears it once extras count.
-                graph_min_dependents=graph_data["min_dependents"],
-                graph_url=_versioned("graph.json", graph_bytes),
-                **shared,
+                page="cascade", **context, **shared
             ),
             encoding="utf-8",
         )

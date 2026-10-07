@@ -50,7 +50,7 @@
       <li><svg width="36" height="8" aria-hidden="true"><path d="M0 4h36" style="stroke: var(--accent)" stroke-width="2"/></svg>Depends on the selection</li>
       <li><svg width="36" height="8" aria-hidden="true"><path d="M0 4h36" style="stroke: var(--ink)" stroke-width="2" stroke-dasharray="4 3"/></svg>The selection depends on it</li>
     </ul>
-    <p>A dot's size is its dependent count. Only projects with at least {{ graph_min_dependents }} dependents are drawn (counting extras when they are switched on), so a trace reaches a project's drawn dependents, not every one: most of numpy's 95,000 are applications nothing else depends on. Projects that share a name prefix, like <code>odoo-*</code>, are drawn near each other. <a href="data.html">How it is counted</a>.</p>
+    <p>A dot's size is its dependent count. Only projects with at least {{ graph_min_dependents }} dependents are drawn (counting extras when they are switched on), so a trace reaches a project's drawn dependents, not every one{% if hub %}: {{ hub.name }} has {{ "{:,}".format(hub.dependents) }} dependents, and the {{ "{:,}".format(hub.drawn) }} drawn are those with at least {{ graph_min_dependents }} of their own{% endif %}. Projects that share a name prefix, like <code>odoo-*</code>, are drawn near each other. <a href="data.html">How it is counted</a>.</p>
     <details class="clouds" id="cloud-key" hidden>
       <summary class="label">Clouds</summary>
       <p>Where projects crowd together. Each is named for what lives there; choose one to go to it.</p>

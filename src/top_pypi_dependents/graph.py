@@ -21,6 +21,13 @@ if TYPE_CHECKING:
 
     import duckdb
 
+# The shape of graph.json. Raise it whenever a field is added, renamed or
+# re-encoded: `render` refuses a graph of any other version, so a page script
+# expecting the new shape is never published beside a file in the old one --
+# which `site.yml`, republishing the committed graph with the newest templates,
+# would otherwise do until the next monthly run.
+GRAPH_VERSION = 1
+
 # Coordinates are rounded onto this grid. Sub-unit precision is invisible at any
 # zoom the page allows, and integers are a third the bytes of floats.
 EXTENT = 10_000
@@ -824,6 +831,7 @@ def build_graph(
     ranked = sum(1 for _, runtime, _ in nodes if runtime >= min_dependents)
 
     return {
+        "version": GRAPH_VERSION,
         "generated_at": snapshot.captured_at.isoformat(),
         "min_dependents": min_dependents,
         "extent": EXTENT,
