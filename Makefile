@@ -20,13 +20,16 @@ lint: $(INSTALL_STAMP)
 	@uv run ruff format --check
 	@uv run ruff check
 	@uv run ty check src tests
+	@biome ci
 
 format: $(INSTALL_STAMP)
 	@uv run ruff format
 	@uv run ruff check --fix
+	@biome check --write
 
 test: $(INSTALL_STAMP)
 	@uv run coverage run -m pytest ; uv run coverage report
+	@node --test tests/js/*.test.js
 
 hooks:
 	@prek run --all-files

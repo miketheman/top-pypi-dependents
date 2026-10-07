@@ -73,9 +73,12 @@ exercisable from a plain checkout with no credentials at all.
 
 ```bash
 make install   # uv sync
-make test      # coverage run + report
-make lint      # ruff format --check, ruff check, ty check
+make test      # coverage run + report, then the page scripts' node tests
+make lint      # ruff format --check, ruff check, ty check, biome ci
 ```
+
+The pages' stylesheets and scripts live in `src/top_pypi_dependents/assets/`;
+linting and testing them needs [Biome](https://biomejs.dev/) and Node.
 
 To run the pipeline end to end against the fixture corpus in `tests/fixtures`,
 without any GCP credentials:

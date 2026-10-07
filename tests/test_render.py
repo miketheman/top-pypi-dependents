@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from datetime import UTC, datetime
@@ -261,7 +262,8 @@ def test_rankings_page_searches_past_its_own_rows(
     """A project ranked past the page is still findable by name."""
     render.render_site(payload, tmp_path, rows=1)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert "search-index.json" in html
+    script = (tmp_path / "assets" / "rankings.js").read_text(encoding="utf-8")
+    assert 'fetch("search-index.json")' in script
     assert 'id="beyond"' in html
 
 
@@ -271,7 +273,7 @@ def test_the_page_reports_how_many_projects_it_carries(
     """The script needs its own row count to know what the index adds."""
     render.render_site(payload, tmp_path, rows=2)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert "const onPage = 2;" in html
+    assert 'data-on-page="2"' in html
 
 
 def test_change_column_is_dropped_when_nothing_moved(
@@ -288,7 +290,7 @@ def test_change_column_is_dropped_when_nothing_moved(
     render.render_site(first_run, tmp_path, rows=2)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert 'scope="col">Change</th>' not in html
-    assert "const showChange = false;" in html
+    assert "data-show-change" not in html
 
 
 def test_change_column_returns_once_projects_move(
@@ -297,7 +299,7 @@ def test_change_column_returns_once_projects_move(
     render.render_site(payload, tmp_path, rows=5)
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert '<th class="num hide-narrow" scope="col">Change</th>' in html
-    assert "const showChange = true;" in html
+    assert "data-show-change" in html
 
 
 def test_a_narrow_screen_keeps_rank_project_and_the_ranked_count(
@@ -408,13 +410,6 @@ def test_the_change_cell_is_dropped_with_its_header(
     assert 'class="num move' not in html
 
 
-def test_the_filter_canonicalises_what_was_typed(tmp_path: Path, payload: dict) -> None:
-    """Every name in the payload is PEP 503 canonical, so the needle must be too."""
-    render.render_site(payload, tmp_path, rows=2)
-    html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert 'replace(/[-_.]+/g, "-")' in html
-
-
 def test_the_page_lists_its_rows_without_a_reveal_control(
     tmp_path: Path, payload: dict
 ) -> None:
@@ -486,16 +481,41 @@ def test_a_graph_adds_the_cascade_page_and_serves_the_graph(
     assert (site / "graph.json").read_bytes() == source.read_bytes()
     page = (site / "cascade.html").read_text(encoding="utf-8")
     assert 'href="cascade.html" aria-current="page"' in page
-    assert 'fetch("graph.json")' in page
+    script = (site / "assets" / "cascade.js").read_text(encoding="utf-8")
+    assert 'fetch("graph.json")' in script
     assert 'href="cascade.html"' in (site / "index.html").read_text(encoding="utf-8")
 
 
-def test_the_cascade_page_is_self_contained(tmp_path: Path, payload: dict) -> None:
-    source = _graph_file(tmp_path, payload)
-    render.render_site(payload, tmp_path / "site", rows=2, graph=source)
-    html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
-    assert "<script src" not in html
-    assert "cdn." not in html
+def test_every_page_loads_only_its_own_assets(tmp_path: Path, payload: dict) -> None:
+    """Nothing from another origin, and every asset a page names is served."""
+    site = tmp_path / "site"
+    render.render_site(payload, site, rows=2, graph=_graph_file(tmp_path, payload))
+    for page in ("index.html", "data.html", "cascade.html"):
+        html = (site / page).read_text(encoding="utf-8")
+        assert not re.search(r'(src|href)="(https?:)?//[^"]*\.(js|css)', html)
+        for name in re.findall(r'"\./assets/([\w.-]+)\?v=', html):
+            assert (site / "assets" / name).is_file(), name
+
+
+def test_an_asset_url_changes_with_its_content(tmp_path: Path, payload: dict) -> None:
+    """A returning reader's cached script is dropped exactly when it changes."""
+    render.render_site(payload, tmp_path, rows=2)
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    content = (tmp_path / "assets" / "rankings.js").read_bytes()
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    assert f'src="./assets/rankings.js?v={digest}"' in html
+
+
+def test_scripts_import_each_other_through_the_versioned_urls(
+    tmp_path: Path, payload: dict
+) -> None:
+    render.render_site(payload, tmp_path, rows=2)
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    found = re.search(r'<script type="importmap">(.*?)</script>', html)
+    assert found is not None
+    imports = json.loads(found.group(1))["imports"]
+    assert imports["./assets/format.js"].startswith("./assets/format.js?v=")
+    assert not any(name.endswith(".css") for name in imports)
 
 
 def test_links_off_the_site_open_a_new_tab_and_say_so(
@@ -537,7 +557,8 @@ def test_simulated_releases_are_hidden_unless_asked_for(
     )
     html = (tmp_path / "site" / "cascade.html").read_text(encoding="utf-8")
     assert '<label class="toggle" id="simulate-toggle" hidden>' in html
-    assert 'has("simulate")' in html
+    script = (tmp_path / "site" / "assets" / "cascade.js").read_text(encoding="utf-8")
+    assert 'has("simulate")' in script
 
 
 def test_clouds_can_be_switched_off(tmp_path: Path, payload: dict) -> None:

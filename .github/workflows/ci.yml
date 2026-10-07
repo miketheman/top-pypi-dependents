@@ -36,6 +36,14 @@ jobs:
         run: uv run ruff check
       - name: Type check
         run: uv run ty check src tests
+      - name: Install Biome
+        uses: biomejs/setup-biome@4c91541eaada48f67d7dbd7833600ce162b68f51 # v2.7.1
+        with:
+          version: 2.5.15
+      - name: Lint and format check scripts and styles
+        run: biome ci
+      - name: Test scripts
+        run: node --test tests/js/*.test.js
       # Runs without the bigquery group on purpose: this is what proves the
       # google-cloud-bigquery and urllib3 imports are genuinely lazy, so every
       # subcommand except `extract` works on a default sync.

@@ -74,7 +74,7 @@ method statement without doing the same work.
   BigQuery), `build`, `artifacts`, `render`. Everything but `extract` runs from
   a plain checkout with no credentials.
 - The site is fully static and **self-contained**: no external font, script, or
-  asset fetches. It is rendered from Jinja templates at publish time and served
+  asset fetches; its stylesheets and scripts are served beside the pages. It is rendered from Jinja templates at publish time and served
   as flat files.
 - The rankings page lists a slice of the ranking, all of it visible. Search
   looks past the page, answering from a published index of every ranked project —

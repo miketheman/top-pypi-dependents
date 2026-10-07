@@ -14,6 +14,7 @@ on:
     branches: [main]
     paths:
       - "src/top_pypi_dependents/templates/**"
+      - "src/top_pypi_dependents/assets/**"
       - "src/top_pypi_dependents/render.py"
       - "data/latest.json"
       - "data/graph.json"

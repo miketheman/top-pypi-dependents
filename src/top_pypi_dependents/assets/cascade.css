@@ -1,0 +1,386 @@
+/* A workspace, not a document: the page is exactly one viewport tall and the
+  graph takes everything the nav, the title and the footer line do not. The
+  controls float over the graph rather than stacking above it, so none of
+  the reader's screen goes to chrome they are not using. `dvh`, so a phone's
+  collapsing URL bar does not push the bottom of the graph out of reach. */
+body.app {
+  max-width: none;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem 0;
+}
+body.app nav {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+body.app main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+body.app footer {
+  margin-top: 0;
+  padding: 0.4rem 0;
+  border-top: 0;
+}
+
+.app-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 1rem;
+  margin-bottom: 0.5rem;
+}
+.app-head h1 {
+  font-size: clamp(1.375rem, 1.2rem + 0.8vw, 1.75rem);
+  margin: 0;
+}
+.app-head p {
+  margin: 0;
+  max-width: none;
+  color: var(--ink-muted);
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 22rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+}
+.surface.dragging {
+  cursor: grabbing;
+}
+.surface canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Panels sit over the graph. Paper at nearly full strength, so text on them
+  stays legible over the densest part of the drawing; a hairline, never a
+  shadow. */
+.panel {
+  position: absolute;
+  z-index: 2;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.75rem;
+}
+.panel p {
+  margin: 0;
+}
+
+.controls {
+  top: 0.75rem;
+  left: 0.75rem;
+  width: min(19rem, calc(100% - 1.5rem));
+}
+.controls input[type="search"] {
+  margin: 0;
+  max-width: none;
+  padding: 0.55rem 0.75rem;
+}
+.controls .label {
+  margin-bottom: 0.35rem;
+}
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin-top: 0.35rem;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.toggle input {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+.toggle:has(input:disabled) {
+  color: var(--ink-subtle);
+  cursor: default;
+}
+/* `display` above would otherwise override the hidden attribute. */
+.toggle[hidden] {
+  display: none;
+}
+.controls .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+}
+.ticker {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  max-width: none;
+}
+.ticker li {
+  margin: 0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail {
+  top: 0.75rem;
+  right: 0.75rem;
+  width: min(20rem, calc(100% - 1.5rem));
+  max-height: calc(100% - 13rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.detail-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.detail-head a {
+  font-size: 1.125rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.detail .meta {
+  margin-top: 0.35rem;
+}
+.detail h2 {
+  margin: 1rem 0 0.4rem;
+}
+.detail ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-width: none;
+}
+.detail li {
+  margin: 0 0 0.15rem;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.detail li .meta {
+  margin: 0 0 0 0.4rem;
+}
+.detail input[type="search"] {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  max-width: none;
+}
+
+/* Names in a list jump to that project. Buttons, because they act on the
+  page; underlined like links, because that is how this site marks "go". */
+button.jump {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  text-align: left;
+}
+button.jump:hover {
+  border-bottom-color: var(--ink-muted);
+}
+
+button.icon {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  font: inherit;
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink-subtle);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+button.icon:hover {
+  border-color: var(--ink);
+}
+
+.key {
+  bottom: 0.75rem;
+  left: 0.75rem;
+  max-width: min(22rem, calc(100% - 1.5rem));
+  padding: 0.5rem 0.75rem;
+}
+.key summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.key ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  max-width: none;
+}
+.key li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+}
+.key svg {
+  flex: none;
+}
+.key p {
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+.key .clouds {
+  margin-top: 0.5rem;
+}
+.key .clouds ul {
+  max-height: 12rem;
+  overflow-y: auto;
+  font-size: 0.8125rem;
+}
+.key .clouds li {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.key .clouds .meta {
+  display: block;
+  color: var(--ink-muted);
+}
+
+/* Where am I: the whole graph in miniature, with the visible part outlined.
+  Zooming far into a cluster is where readers get lost, and this is the way
+  back that does not throw away where they were. */
+.navigator {
+  bottom: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+.navigator canvas {
+  width: 8.5rem;
+  height: 8.5rem;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+.zoom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tip {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  padding: 0.4rem 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--ink-subtle);
+  border-radius: 2px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.tip strong {
+  font-weight: 500;
+}
+.tip span {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* Narrow: the selection becomes a sheet along the bottom, and the key and
+  the navigator step aside for it. Pinch does what the zoom buttons do. */
+@media (max-width: 44rem) {
+  body.app {
+    padding: 0.5rem 0.5rem 0;
+  }
+  .app-head p {
+    display: none;
+  }
+  .controls {
+    top: 0.5rem;
+    left: 0.5rem;
+    width: calc(100% - 1rem);
+    padding: 0.5rem 0.6rem;
+  }
+  .controls .label {
+    display: none;
+  }
+  .ticker {
+    display: none;
+  }
+  .detail {
+    top: auto;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    max-height: 38%;
+  }
+  .navigator canvas {
+    display: none;
+  }
+  .navigator {
+    bottom: 0.5rem;
+    right: 0.5rem;
+    padding: 0.35rem;
+  }
+  .key {
+    bottom: 0.5rem;
+    left: 0.5rem;
+  }
+  .stage:has(.detail:not([hidden])) .key,
+  .stage:has(.detail:not([hidden])) .navigator {
+    display: none;
+  }
+  body.app footer p:not(:first-child) {
+    display: none;
+  }
+}
+
+/* Last, being the most specific rule about a paragraph: the footer line
+  is one row of inline facts. */
+body.app footer p {
+  display: inline;
+  margin: 0 1rem 0 0;
+}

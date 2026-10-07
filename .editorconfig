@@ -23,3 +23,6 @@ indent_style = tab
 
 [*.md]
 indent_style = unset
+
+[*.{js,css}]
+indent_size = 2

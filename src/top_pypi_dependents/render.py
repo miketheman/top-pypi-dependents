@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
+from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
@@ -93,6 +95,38 @@ def _readable_date(generated_at: str) -> str:
     return f"{moment:%B} {moment.day}, {moment.year}"
 
 
+def _write_assets(out_dir: Path) -> dict[str, str]:
+    """Copy the stylesheets and scripts beside the pages; return their URLs.
+
+    Each URL carries a hash of the file's content, so a returning reader's
+    cached copy is dropped exactly when the file changes rather than up to ten
+    minutes later, when Pages' cache lets go -- a page's markup and its script
+    from different months would not agree on ids.
+    """
+    target = out_dir / "assets"
+    target.mkdir(parents=True, exist_ok=True)
+    urls = {}
+    sources = files("top_pypi_dependents").joinpath("assets").iterdir()
+    for source in sorted(sources, key=lambda source: source.name):
+        content = source.read_bytes()
+        (target / source.name).write_bytes(content)
+        digest = hashlib.sha256(content).hexdigest()[:12]
+        urls[source.name] = f"./assets/{source.name}?v={digest}"
+    return urls
+
+
+def _importmap(assets: dict[str, str]) -> dict[str, dict[str, str]]:
+    """Scripts import each other by plain relative path; this gives those
+    imports the same content-hashed URLs the pages use."""
+    return {
+        "imports": {
+            f"./assets/{name}": url
+            for name, url in assets.items()
+            if name.endswith(".js")
+        }
+    }
+
+
 def _environment() -> Environment:
     return Environment(
         loader=PackageLoader("top_pypi_dependents", "templates"),
@@ -139,6 +173,7 @@ def render_site(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _environment()
+    assets = _write_assets(out_dir)
     shared = {
         "generated_at": _readable_date(payload["generated_at"]),
         "source": _SOURCE_LABELS.get(payload["source"], payload["source"]),
@@ -161,6 +196,8 @@ def render_site(
         "asset_month": _asset_month(payload["generated_at"]),
         "payload_shape": _payload_shape(payload),
         "has_cascade": graph_data is not None,
+        "asset": assets.__getitem__,
+        "importmap": _importmap(assets),
     }
 
     # Served from Pages rather than linked out of the git repository: a raw-git

@@ -134,6 +134,16 @@ name prefix (`odoo14-*`, `alibabacloud-*`) are tied to an invisible hub, and edg
 into big hubs are weighted down by `1/log2(2 + dependents)`; neither is drawn. Raise
 the hub weight and the core collapses back into a knot around numpy.
 
+**Stylesheets and scripts are files, not template blocks.** They live in
+`src/top_pypi_dependents/assets/`, and `render` copies them beside the pages with a
+content hash in each URL. Scripts are ES modules: the page scripts (`rankings.js`,
+`cascade.js`) touch the DOM on import, so anything worth a test goes in a pure module
+(`format.js`, `search.js`, `graph-model.js`) that `tests/js/` imports directly. The
+import map in `base.html.j2` gives module-to-module imports the same hashed URLs; a
+value in it must start with `./`, or the browser maps the import to nothing. Values a
+script needs from the template travel as `data-` attributes. Biome lints and formats
+these files and nothing else -- `biome.json` scopes it away from `data/`.
+
 **The cascade page caches the still graph.** Edges and dots render into a multisampled
 offscreen target only when the view or selection changes; each frame copies it and
 draws only what moves. The copy goes through a resolved texture because a multisampled
@@ -171,20 +181,21 @@ projects declared in October 2026. Snapshots ranked before that change counted t
 
 ```bash
 make install          # uv sync
-make lint             # ruff format --check, ruff check, ty check
-make test             # coverage run -m pytest, then coverage report
+make lint             # ruff format --check, ruff check, ty check, biome ci
+make test             # coverage run -m pytest, coverage report, node --test
 prek run --all-files  # the git-hook gate; must pass on a clean clone
 ```
 
 The suite differs by dependency group, and both arms run in CI:
 
 ```bash
-uv sync                        # 209 passed, 3 skipped
-uv sync --group bigquery       # 212 passed, 0 skipped
+uv sync                        # 210 passed, 3 skipped
+uv sync --group bigquery       # 213 passed, 0 skipped
 ```
 
 The three skips are the `fetch_live_names` tests, which need `urllib3` from the
-`bigquery` group.
+`bigquery` group. `node --test tests/js/*.test.js` runs 11 more, against the pure
+modules the pages import.
 
 Full pipeline against the fixture, no credentials needed:
 
