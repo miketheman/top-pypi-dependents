@@ -29,6 +29,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   // The haze where projects crowd, and the names the build gave those crowds.
   const cloudsToggle = $("clouds");
   const cloudsOn = () => cloudsToggle.checked;
+  // A trace lights every project a release reaches, however far; direct only
+  // stops at the first hop either way, which on a hub is the readable part.
+  const directToggle = $("direct");
+  const hops = () => (directToggle.checked ? 1 : Number.POSITIVE_INFINITY);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   // Everything that moves -- a trace's pulses, a release's glow, simulated
   // releases -- answers to this one switch. Off leaves the trace drawn still:
@@ -547,8 +551,12 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     edgeFocus.fill(0);
     trace = null;
     if (origin < 0) return;
-    const downDepth = reach(origin, down, downStart);
-    const upDepth = reach(origin, up, upStart);
+    // The counts are always the whole reach; only what is drawn stops short.
+    const downAll = reach(origin, down, downStart);
+    const upAll = reach(origin, up, upStart);
+    const near = (depths) => new Map([...depths].filter(([, d]) => d <= hops()));
+    const downDepth = near(downAll);
+    const upDepth = near(upAll);
     for (const [i, d] of downDepth) nodeFocus[i] = d;
     for (const [i, d] of upDepth) if (d) nodeFocus[i] = -d;
     nodeFocus[origin] = 0.5;
@@ -590,8 +598,8 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     // thousand would be a solid green disc, so they thin as they multiply.
     traceAlpha = Math.min(1, Math.sqrt(400 / Math.max(traced, 1)));
     trace = {
-      down: downDepth.size - 1,
-      up: upDepth.size - 1,
+      down: downAll.size - 1,
+      up: upAll.size - 1,
       nodes: [...upDepth.keys(), ...downDepth.keys()].sort((a, b) => a - b),
     };
   }
@@ -626,7 +634,7 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     let frontier = [origin];
     litAt.set(origin, { t: now, amp: 1 });
     let lit = 1;
-    for (let depth = 1; depth <= MAX_DEPTH && frontier.length && lit < MAX_LIT; depth++) {
+    for (let depth = 1; depth <= Math.min(MAX_DEPTH, hops()) && frontier.length && lit < MAX_LIT; depth++) {
       const next = [];
       const t = now + depth * HOP_MS;
       const amp = DECAY ** depth;
@@ -1321,6 +1329,14 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
     if (e.key === "Escape" && selected >= 0 && graph) select(-1);
   });
 
+  // Emptying the field -- its clear button, or deleting what was typed -- is
+  // starting over: the selection goes and the whole graph comes back.
+  find.addEventListener("input", () => {
+    if (find.value || !graph) return;
+    findNote.hidden = true;
+    if (selected >= 0) select(-1);
+    fit();
+  });
   find.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || !graph) return;
     const wanted = canonical(find.value);
@@ -1350,6 +1366,10 @@ import { adjacency, cloudAt, cloudBounds, decodeEdges, reach, spreadCells } from
   });
 
   extrasToggle.addEventListener("change", () => graph && setMode(extrasToggle.checked));
+  directToggle.addEventListener("change", () => {
+    if (graph && selected >= 0) select(selected, { quiet: true });
+    dirty = true;
+  });
 
   // Simulated releases, standing in for PyPI's RSS feed. A uniform pick is the
   // honest stand-in: most releases are leaves, and a hub is a rare, big event.
