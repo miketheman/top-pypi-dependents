@@ -296,10 +296,12 @@ def load_snapshot(
 
     con.begin()
     try:
-        next_id = con.execute(
+        # fetchall, not fetchone: DuckDB 2 refuses register() while a result
+        # is only partly fetched, and _insert_arrow registers next.
+        [(next_id,)] = con.execute(
             "SELECT coalesce(max(snapshot_id), 0) + 1 FROM snapshots"
-        ).fetchone()
-        snapshot_id = int(next_id[0])  # ty: ignore[not-subscriptable]
+        ).fetchall()
+        snapshot_id = int(next_id)
 
         project_rows = [
             (
