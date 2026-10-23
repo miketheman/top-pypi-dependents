@@ -1,4 +1,4 @@
-.PHONY: all clean install lint format test hooks site serve
+.PHONY: all clean install lint format test hooks site serve upgrade
 
 INSTALL_STAMP := .install.stamp
 UV := $(shell command -v uv 2> /dev/null)
@@ -33,6 +33,12 @@ test: $(INSTALL_STAMP)
 
 hooks:
 	@prek run --all-files
+
+# The new uv.lock outdates the install stamp, so lint and test run against
+# what was just resolved rather than the venv from before.
+upgrade:
+	@uv lock --upgrade
+	@$(MAKE) --no-print-directory lint test
 
 # The graph is optional, as it is in the workflows: a month whose graph step
 # failed publishes the site without the cascade page.

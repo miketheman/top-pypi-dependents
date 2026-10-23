@@ -188,6 +188,7 @@ projects declared in October 2026. Snapshots ranked before that change counted t
 make install          # uv sync
 make lint             # ruff format --check, ruff check, ty check, biome ci
 make test             # coverage run -m pytest, coverage report, npm test
+make upgrade          # uv lock --upgrade, then lint and test against the new lock
 prek run --all-files  # the git-hook gate; must pass on a clean clone
 make site             # render the committed data/ into site/
 make serve            # the same, served on :8000, re-rendered and reloaded on change
