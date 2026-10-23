@@ -23,10 +23,10 @@ repos:
     hooks:
       - id: ty
   - repo: https://github.com/biomejs/pre-commit
-    rev: v2.5.15
+    rev: v2.6.2
     hooks:
       - id: biome-check
-        additional_dependencies: ["@biomejs/biome@2.5.15"]
+        additional_dependencies: ["@biomejs/biome@2.6.2"]
   - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
     rev: 3.11.1
     hooks:
