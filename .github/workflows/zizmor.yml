@@ -21,7 +21,7 @@ jobs:
       # `repo: builtin` shorthand is not in upstream pre-commit's schema, so
       # zizmor cannot deserialize .pre-commit-config.yaml and aborts the whole
       # audit before it reaches a single workflow.
-      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           collect: workflows,actions,dependabot
           # Code scanning needs GitHub Advanced Security, which a private repo
